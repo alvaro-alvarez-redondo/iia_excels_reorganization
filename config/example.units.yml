@@ -1,0 +1,26 @@
+unit_mode: standard
+
+document_categories:
+  reviewed_239_239azucar_caña_brutaprod: 1
+  reviewed_466_475arrozimp_exp: 2
+
+# Optional aliases if the extracted source product needs to map back to the
+# canonical product name used by the unit rules.
+product_aliases:
+  tea: te
+
+# Optional translations for the harmonized output document name.
+product_translations:
+  azucar cana bruta: raw cane sugar
+  arroz: rice
+
+# Optional explicit overrides. Keys can be either:
+#   - <sheet_name>
+#   - <document_stem>:<sheet_name>
+unit_overrides:
+  imports: tonnes
+
+# Optional sheet filter.
+# include_sheets:
+#   - AREA
+#   - PRODUCTION

@@ -1,0 +1,189 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+from iia_excel_reorg.config import load_config
+from iia_excel_reorg.naming import canonical_document_name, extract_source_product, infer_yearbook_metadata
+from iia_excel_reorg.transformer import transform_workbook
+from iia_excel_reorg.unit_rules import assign_unit
+from iia_excel_reorg.xlsx_io import SheetData, WorkbookData, read_workbook, write_workbook
+
+GREEN = "FF00FF00"
+YELLOW = "FFFFFF00"
+ORANGE = "FFFFA500"
+
+
+
+def _build_source_workbook(path: Path, *, include_imports: bool = False) -> None:
+    area = SheetData(name="AREA")
+    area.set_cell(1, 2, "1909-1913")
+    area.set_cell(1, 3, "1922")
+    area.set_cell(2, 1, "HÉMISPHÈRE SEPTENTRIONAL")
+    area.set_cell(3, 1, "EUROPE.")
+    area.set_cell(4, 1, "Belgique-Luxembourg (reexports) (special case)", fill_rgb=GREEN)
+    area.set_cell(4, 2, 17268, fill_rgb=YELLOW)
+    area.set_cell(4, 3, 11887, fill_rgb=ORANGE)
+    area.set_cell(5, 1, "Germany", fill_rgb=GREEN)
+    area.set_cell(5, 2, 284000, fill_rgb=GREEN)
+
+    sheets = [area]
+
+    production = SheetData(name="PRODUCTION")
+    production.set_cell(1, 2, "1909-10/1913")
+    production.set_cell(1, 3, "1922-23")
+    production.set_cell(2, 1, "Hemisphère méridional")
+    production.set_cell(3, 1, "Amérique")
+    production.set_cell(4, 1, "Canada", fill_rgb=GREEN)
+    production.set_cell(4, 2, 194876, fill_rgb=GREEN)
+    production.set_cell(4, 3, 315569, fill_rgb=YELLOW)
+    sheets.append(production)
+
+    if include_imports:
+        imports = SheetData(name="IMPORTS")
+        imports.set_cell(1, 2, "1934-1938")
+        imports.set_cell(1, 3, "1946")
+        imports.set_cell(2, 1, "HÉMISPHÈRE SEPTENTRIONAL")
+        imports.set_cell(3, 1, "EUROPE")
+        imports.set_cell(4, 1, "Austria (unit note q)", fill_rgb=GREEN)
+        imports.set_cell(4, 2, 7.5, fill_rgb=GREEN)
+        imports.set_cell(4, 3, 0.2, fill_rgb=YELLOW)
+        sheets.append(imports)
+
+    write_workbook(path, WorkbookData(sheets=sheets))
+
+
+
+def test_transform_workbook_assigns_units_from_rules_and_preserves_notes(tmp_path: Path) -> None:
+    source_path = tmp_path / "r_fao_trade_1950_3_5_wheat.xlsx"
+    output_path = tmp_path / "standardized.xlsx"
+    _build_source_workbook(source_path)
+
+    config_path = tmp_path / "config.yml"
+    config_path.write_text(
+        "\n".join(
+            [
+                'unit_mode: standard',
+                'document_categories:',
+                '  r_fao_trade_1950_3_5_wheat: 1',
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    transform_workbook(source_path, output_path, config=load_config(config_path))
+
+    result = read_workbook(output_path)
+    assert [sheet.name for sheet in result.sheets] == ["area", "production"]
+
+    area = result.sheets[0]
+    assert [area.get_cell(1, idx).value for idx in range(1, 8)] == [
+        "hemisphere",
+        "continent",
+        "country",
+        "unit",
+        "footnotes",
+        "1909-1913",
+        "1922",
+    ]
+    assert area.get_cell(2, 1).value == "HÉMISPHÈRE SEPTENTRIONAL"
+    assert area.get_cell(2, 2).value == "EUROPE"
+    assert area.get_cell(2, 3).value == "Belgique-Luxembourg"
+    assert area.get_cell(2, 4).value == "1000 ha"
+    assert area.get_cell(2, 5).value == "reexports; special case"
+    assert area.get_cell(2, 6).value == 17268
+    assert area.get_cell(2, 7).value == 11887
+    assert area.get_cell(2, 1).fill_rgb == GREEN
+    assert area.get_cell(2, 6).fill_rgb == YELLOW
+    assert area.get_cell(2, 7).fill_rgb == ORANGE
+
+    production = result.sheets[1]
+    assert production.get_cell(2, 1).value == "Hemisphère méridional"
+    assert production.get_cell(2, 2).value == "Amérique"
+    assert production.get_cell(2, 3).value == "Canada"
+    assert production.get_cell(2, 4).value == "1000 q"
+    assert production.get_cell(2, 6).value == 194876
+    assert production.get_cell(2, 7).value == 315569
+
+
+
+def test_transform_workbook_supports_inputs_mode_and_harmonized_output_names(tmp_path: Path) -> None:
+    source_dir = tmp_path / "raw inputs" / "trade" / "extracted_pages_1938_39"
+    source_dir.mkdir(parents=True)
+    source_path = source_dir / "reviewed_466_475arrozimp_exp.xlsx"
+    output_dir = tmp_path / "out"
+    output_dir.mkdir()
+    _build_source_workbook(source_path, include_imports=True)
+
+    config_path = tmp_path / "config.yml"
+    config_path.write_text(
+        "\n".join(
+            [
+                'unit_mode: inputs',
+                'document_categories:',
+                '  reviewed_466_475arrozimp_exp: 2',
+                'product_translations:',
+                '  arroz: rice',
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    config = load_config(config_path)
+    output_path = output_dir / f"{config.canonical_name_for_document(source_path)}.xlsx"
+    transform_workbook(source_path, output_path, config=config)
+
+    assert output_path.name == "r_iia_trade_1938_466_475_rice.xlsx"
+    result = read_workbook(output_path)
+    imports = result.sheets[2]
+    assert imports.name == "imports"
+    assert imports.get_cell(2, 3).value == "Austria"
+    assert imports.get_cell(2, 4).value == "1000 kg"
+    assert imports.get_cell(2, 5).value == "unit note q"
+    assert imports.get_cell(2, 6).value == 7.5
+    assert imports.get_cell(2, 7).value == 0.2
+
+
+
+def test_naming_and_unit_rules_cover_reviewed_documents() -> None:
+    path = Path("raw inputs/trade/extracted_pages_1938_39/reviewed_239_239azucar_caña_brutaprod.xlsx")
+    assert infer_yearbook_metadata(path) == {"agency": "iia", "yearbook": "trade", "year": "1938"}
+    assert extract_source_product(path) == "azucar cana bruta"
+    assert canonical_document_name(path) == "r_iia_trade_1938_239_239_raw_cane_sugar"
+    assert assign_unit("imports", "te", 1) == "tonnes"
+    assert assign_unit("imports", "te", 2) == "q"
+    assert assign_unit("production", "vino", 1) == "1000 hl"
+    assert assign_unit("production", "huevos", 2) == "1000 eggs"
+    assert assign_unit("livestock", "whatever", 1) == "1000 heads"
+    assert assign_unit("production", "whatever", None) == ""
+
+
+
+def test_load_config_parses_rule_based_yaml(tmp_path: Path) -> None:
+    config_path = tmp_path / "units.yml"
+    config_path.write_text(
+        "\n".join(
+            [
+                'unit_mode: standard',
+                'document_categories:',
+                '  reviewed_466_475arrozimp_exp: 1',
+                'product_aliases:',
+                '  tea: te',
+                'product_translations:',
+                '  arroz: rice',
+                'unit_overrides:',
+                '  imports: tonnes',
+                'include_sheets:',
+                '  - AREA',
+                '  - PRODUCTION',
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    config = load_config(config_path)
+    assert config.unit_mode == "standard"
+    assert config.document_categories["reviewed_466_475arrozimp_exp"] == 1
+    assert config.product_aliases["tea"] == "te"
+    assert config.product_translations["arroz"] == "rice"
+    assert config.unit_overrides["imports"] == "tonnes"
+    assert config.include_sheets == ["AREA", "PRODUCTION"]
