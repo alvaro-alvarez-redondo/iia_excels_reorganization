@@ -19,15 +19,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "input",
         nargs="?",
-        default="raw inputs",
+        default="data/raw inputs",
         help="Excel workbook file or directory containing workbook files. "
-             "Defaults to the 'raw inputs/' folder in the current directory. "
-             "Quote the path when it contains spaces: \"raw inputs\".",
+             "Defaults to the 'data/raw inputs/' folder in the current directory. "
+             "Quote the path when it contains spaces: \"data/raw inputs\".",
     )
     parser.add_argument(
         "output_dir",
         nargs="?",
-        default="10-raw_imports",
+        default="data/10-raw_imports",
         help="Directory where transformed workbooks will be written. "
              "Defaults to '10-raw_imports/' in the current directory.",
     )

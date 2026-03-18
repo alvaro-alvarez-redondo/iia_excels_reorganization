@@ -217,6 +217,7 @@ def test_compute_output_subdir_with_deep_nesting() -> None:
 
 
 
+def test_compute_output_subdir_without_extracted_pages() -> None:
     # Excel file with no extracted_pages_* segment → placed in output root
     path = Path("some/other/dir/workbook.xlsx")
     result = _compute_output_subdir(path)
