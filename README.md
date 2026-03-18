@@ -9,9 +9,9 @@ structured, analysis-ready workbooks.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│  1. INPUT  –  place historical .xlsx scans in raw inputs/           │
+│  1. INPUT  –  place historical .xlsx scans in data/raw inputs/      │
 │                                                                     │
-│  raw inputs/                                                        │
+│  data/raw inputs/                                                   │
 │  ├── trade/extracted_pages_1938_39/reviewed_466_475arrozimp.xlsx    │
 │  ├── livestock/extracted_pages_1933_34/reviewed_12_15cattle.xlsx    │
 │  └── area and production/                                           │
@@ -22,7 +22,7 @@ structured, analysis-ready workbooks.
 ┌─────────────────────────────────────────────────────────────────────┐
 │  2. CONFIGURE  –  create (or reuse) a YAML config file              │
 │                                                                     │
-│  config/example.units.yml defines:                                  │
+│  workflow/config/example.units.yml defines:                         │
 │  • unit_mode       standard | inputs                                │
 │  • document_categories   stem → category number                     │
 │  • product_aliases       source product → canonical product         │
@@ -35,8 +35,9 @@ structured, analysis-ready workbooks.
 ┌─────────────────────────────────────────────────────────────────────┐
 │  3. RUN  –  execute the CLI from the project root                   │
 │                                                                     │
-│  iia-excel-reorg --config config/example.units.yml                  │
-│  (defaults: input = "raw inputs/", output = "10-raw_imports/")      │
+│  iia-excel-reorg --config workflow/config/example.units.yml         │
+│  (defaults: input = "data/raw inputs/",                             │
+│             output = "data/10-raw_imports/")                        │
 └────────────────────────┬────────────────────────────────────────────┘
                          │
                   per workbook file
@@ -98,9 +99,9 @@ structured, analysis-ready workbooks.
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-**In short:** drop your scanned Excel files into `raw inputs/`, point the
+**In short:** drop your scanned Excel files into `data/raw inputs/`, point the
 CLI at your config, and the tool produces one clean, consistently structured
-workbook per source file inside `10-raw_imports/`, organised into
+workbook per source file inside `data/10-raw_imports/`, organised into
 `fao_extracted_pages_YYYY/fao_{topic}_YYYY/` subdirectories.
 
 ---
@@ -122,7 +123,7 @@ The transformer currently supports the rules you specified:
 - keeps repeated country/entity rows exactly as they appear in the source workbook
 - assigns `unit` automatically from the document category, sheet variable, and source product using the rules you provided
 - harmonizes reviewed document names into the canonical `r_fao_<yearbook>_<year>_<page_start>_<page_end>_<english_product>` format
-- derives missing yearbook metadata from the folder path, for example `raw inputs/trade/extracted_pages_1938_39/...` becomes `trade` and `1938`
+- derives missing yearbook metadata from the folder path, for example `data/raw inputs/trade/extracted_pages_1938_39/...` becomes `trade` and `1938`
 - strips source suffixes such as `sup`, `prod`, `rend`, `imp`, `exp`, and `num` before translating the product portion of the document name
 - supports both the standard FAO unit rules and the special `inputs` unit rules
 - includes automated tests and a GitHub Actions CI workflow
@@ -132,18 +133,23 @@ The transformer currently supports the rules you specified:
 ```text
 .
 ├── .github/workflows/ci.yml
-├── config/example.units.yml
+├── pyproject.toml
 ├── pytest.ini
 ├── setup.py
-├── src/iia_excel_reorg/
-│   ├── __init__.py
-│   ├── cli.py
-│   ├── config.py
-│   ├── naming.py
-│   ├── transformer.py
-│   ├── unit_rules.py
-│   └── xlsx_io.py
-└── tests/test_transformer.py
+├── workflow/                    ← scripts + config
+│   ├── config/example.units.yml
+│   ├── src/iia_excel_reorg/
+│   │   ├── __init__.py
+│   │   ├── cli.py
+│   │   ├── config.py
+│   │   ├── naming.py
+│   │   ├── transformer.py
+│   │   ├── unit_rules.py
+│   │   └── xlsx_io.py
+│   └── tests/test_transformer.py
+└── data/                        ← input + output
+    ├── raw inputs/              ← place source Excel files here
+    └── 10-raw_imports/          ← transformed output written here
 ```
 
 ## Installation
@@ -160,9 +166,9 @@ source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -e .[dev]
 ```
 
-> **Folder name:** the input directory is called **`raw inputs/`** (with a
-> space), not `raw_inputs/` (with an underscore).  Make sure you place your
-> Excel files under `raw inputs/` at the project root.
+> **Folder name:** the input directory is called **`data/raw inputs/`** (with a
+> space in `raw inputs`).  Make sure you place your Excel files under
+> `data/raw inputs/` at the project root.
 
 ## Configuration
 
@@ -197,7 +203,7 @@ unit_overrides:
 - `unit_overrides`: optional explicit unit override by sheet name or by `document_stem:sheet_name`
 - `include_sheets`: optional list of sheet names to process
 
-You can use the example file at `config/example.units.yml` as a starting point.
+You can use the example file at `workflow/config/example.units.yml` as a starting point.
 
 > Note: the parser intentionally supports the simple YAML structure used for this project configuration.
 
@@ -205,13 +211,13 @@ You can use the example file at `config/example.units.yml` as a starting point.
 
 ### Where to place the input files
 
-Drop your Excel workbooks into the **`raw inputs/`** folder at the root of this
+Drop your Excel workbooks into the **`data/raw inputs/`** folder at the root of this
 project.  That directory is already created and pre-structured to mirror the
 exact source layout described below.  Git ignores any `*.xlsx` / `*.xlsm` files
 inside it, so your source files won't be accidentally committed.
 
 ```text
-raw inputs/                         ← place your source Excel files here
+data/raw inputs/                    ← place your source Excel files here
 ├── area and production/
 │   ├── multiple product/
 │   │   ├── extracted_pages_1933_34/   ← drop .xlsx files in the appropriate year folder
@@ -260,9 +266,9 @@ raw inputs/                         ← place your source Excel files here
     └── extracted_pages_1938_39/
 ```
 
-Transformed workbooks are written to **`10-raw_imports/`** (also at the project
-root).  That directory is pre-created and its generated `*.xlsx` files are
-gitignored.
+Transformed workbooks are written to **`data/10-raw_imports/`** inside the
+`data/` folder.  That directory is pre-created and its generated `*.xlsx` files
+are gitignored.
 
 ### Expected input structure (technical detail)
 
@@ -295,7 +301,7 @@ still processed but land directly in the output root.
 ### Generated output structure
 
 ```text
-10-raw_imports/
+data/10-raw_imports/
 └── fao_extracted_pages_YYYY/
     └── fao_{topic}_YYYY/
         └── r_fao_<topic>_<year>_<start>_<end>_<product>.xlsx
@@ -315,7 +321,7 @@ The subfolder name is derived from:
 Input:
 
 ```text
-raw inputs/
+data/raw inputs/
 └── trade/
     └── extracted_pages_1938_39/
         ├── reviewed_466_475arrozimp_exp.xlsx
@@ -326,7 +332,7 @@ raw inputs/
 Generated output:
 
 ```text
-10-raw_imports/
+data/10-raw_imports/
 └── fao_extracted_pages_1938/
     ├── fao_trade_1938/
     │   └── r_fao_trade_1938_466_475_rice.xlsx
@@ -347,26 +353,26 @@ Generated output:
 
 ## Usage
 
-Once your Excel files are in place under `raw inputs/`, run the tool from the
+Once your Excel files are in place under `data/raw inputs/`, run the tool from the
 project root:
 
 ```bash
-# Use the conventional default paths (raw inputs/ → 10-raw_imports/)
-iia-excel-reorg --config config/example.units.yml
+# Use the conventional default paths (data/raw inputs/ → data/10-raw_imports/)
+iia-excel-reorg --config workflow/config/example.units.yml
 ```
 
 You can also specify paths explicitly:
 
 ```bash
 # Single workbook
-iia-excel-reorg path/to/source.xlsx path/to/output/ --config config/example.units.yml
+iia-excel-reorg path/to/source.xlsx path/to/output/ --config workflow/config/example.units.yml
 
 # Entire directory tree
-iia-excel-reorg path/to/input_dir path/to/output/ --config config/example.units.yml
+iia-excel-reorg path/to/input_dir path/to/output/ --config workflow/config/example.units.yml
 ```
 
-The `input` argument defaults to `raw inputs/` and the `output_dir` argument
-defaults to `10-raw_imports/` — both relative to the current working directory.
+The `input` argument defaults to `data/raw inputs/` and the `output_dir` argument
+defaults to `data/10-raw_imports/` — both relative to the current working directory.
 
 ## Transformation rules implemented
 
@@ -461,7 +467,7 @@ pytest
 Run the CLI module directly:
 
 ```bash
-python -m iia_excel_reorg.cli path/to/source.xlsx output/ --config config/example.units.yml
+python -m iia_excel_reorg.cli path/to/source.xlsx output/ --config workflow/config/example.units.yml
 ```
 
 ## GitHub Actions
