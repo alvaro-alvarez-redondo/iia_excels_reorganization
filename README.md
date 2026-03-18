@@ -148,11 +148,21 @@ The transformer currently supports the rules you specified:
 
 ## Installation
 
+> **Important:** always install the package through `pip`, not by running
+> `setup.py` directly.  Running `python setup.py install` (or `%run setup.py`
+> in IPython) will fail with `ModuleNotFoundError: No module named 'setuptools'`
+> unless setuptools happens to be pre-installed in your environment.  `pip`
+> handles the build-system bootstrapping for you automatically.
+
 ```bash
 python -m venv .venv
-source .venv/bin/activate
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -e .[dev]
 ```
+
+> **Folder name:** the input directory is called **`raw inputs/`** (with a
+> space), not `raw_inputs/` (with an underscore).  Make sure you place your
+> Excel files under `raw inputs/` at the project root.
 
 ## Configuration
 
