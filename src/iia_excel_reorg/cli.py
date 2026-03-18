@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 
 from .config import load_config
+from .naming import sanitize_name
 from .transformer import transform_workbook
 
 _EXTRACTED_PAGES_RE = re.compile(r"^extracted_pages_(?P<year>\d{4})_\d{2}$", re.IGNORECASE)
@@ -52,7 +53,7 @@ def _compute_output_subdir(workbook_path: Path) -> Path:
             # Parts between the extracted_pages directory and the file itself
             intermediate = parts[idx + 1 : -1]
             if intermediate:
-                child_dir = f"iia_{intermediate[0]}_{year}"
+                child_dir = sanitize_name(f"iia_{intermediate[0]}_{year}")
                 return Path(parent_dir) / child_dir
             return Path(parent_dir)
     return Path(".")
@@ -104,7 +105,7 @@ def main() -> None:
     for workbook, output_subdir in workbook_entries:
         output_dir = output_root / output_subdir
         output_dir.mkdir(parents=True, exist_ok=True)
-        output_name = f"{config.canonical_name_for_document(workbook)}.xlsx"
+        output_name = f"{sanitize_name(config.canonical_name_for_document(workbook))}.xlsx"
         output_path = output_dir / output_name
         transform_workbook(workbook, output_path, config=config)
         print(f"Wrote {output_path}")

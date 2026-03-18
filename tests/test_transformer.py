@@ -4,7 +4,7 @@ from pathlib import Path
 
 from iia_excel_reorg.cli import _compute_output_subdir, _iter_workbooks_structured
 from iia_excel_reorg.config import load_config
-from iia_excel_reorg.naming import canonical_document_name, extract_source_product, infer_yearbook_metadata
+from iia_excel_reorg.naming import canonical_document_name, extract_source_product, infer_yearbook_metadata, sanitize_name
 from iia_excel_reorg.transformer import transform_workbook
 from iia_excel_reorg.unit_rules import assign_unit
 from iia_excel_reorg.xlsx_io import SheetData, WorkbookData, read_workbook, write_workbook
@@ -279,3 +279,47 @@ def test_cli_main_creates_structured_output(tmp_path: Path) -> None:
     assert output_subdir.is_dir(), f"Expected output subdir not found: {output_subdir}"
     xlsx_files = list(output_subdir.glob("*.xlsx"))
     assert len(xlsx_files) == 1
+
+
+
+# ---------------------------------------------------------------------------
+# sanitize_name unit tests
+# ---------------------------------------------------------------------------
+
+def test_sanitize_name_replaces_spaces_with_underscores() -> None:
+    assert sanitize_name("raw cane sugar") == "raw_cane_sugar"
+
+
+def test_sanitize_name_collapses_duplicate_underscores() -> None:
+    assert sanitize_name("r_iia__trade__1938") == "r_iia_trade_1938"
+
+
+def test_sanitize_name_strips_leading_and_trailing_underscores() -> None:
+    assert sanitize_name("_wheat_") == "wheat"
+
+
+def test_sanitize_name_combined_spaces_and_duplicates() -> None:
+    assert sanitize_name("iia  crops  1929") == "iia_crops_1929"
+    assert sanitize_name("iia__crops__1929") == "iia_crops_1929"
+
+
+def test_sanitize_name_no_change_when_already_clean() -> None:
+    assert sanitize_name("r_iia_trade_1938_466_475_rice") == "r_iia_trade_1938_466_475_rice"
+
+
+def test_canonical_document_name_has_no_duplicate_underscores() -> None:
+    # Folder name "my trade" has a space → yearbook becomes "my_trade" (no double underscores)
+    path = Path("inputs/my trade/extracted_pages_1938_39/reviewed_1_2_wheat.xlsx")
+    name = canonical_document_name(path)
+    assert " " not in name
+    assert "__" not in name
+    assert name == "r_iia_my_trade_1938_1_2_wheat"
+
+
+def test_compute_output_subdir_sanitizes_space_in_folder_name() -> None:
+    # Intermediate folder "my crops" has a space → must become "iia_my_crops_1929"
+    path = Path("inputs/reviewed_iia/extracted_pages_1929_30/my crops/reviewed_1_2.xlsx")
+    result = _compute_output_subdir(path)
+    assert " " not in str(result)
+    assert "__" not in str(result)
+    assert result == Path("iia_extracted_pages_1929/iia_my_crops_1929")
