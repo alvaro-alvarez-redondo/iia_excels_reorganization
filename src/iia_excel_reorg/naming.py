@@ -14,10 +14,10 @@ _MULTI_UNDERSCORE_RE = re.compile(r"_+")
 
 
 def sanitize_name(name: str) -> str:
-    """Return *name* with spaces replaced by ``_`` and consecutive underscores collapsed.
+    """Return *name* with spaces replaced by ``_``, consecutive underscores collapsed, and leading/trailing underscores stripped.
 
-    Leading and trailing underscores are also stripped so that the result is a
-    clean identifier suitable for folder names and Excel filenames.
+    The result is a clean identifier suitable for folder names and Excel
+    filenames.
     """
     result = name.replace(" ", "_")
     result = _MULTI_UNDERSCORE_RE.sub("_", result)

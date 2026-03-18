@@ -88,6 +88,68 @@ You can use the example file at `config/example.units.yml` as a starting point.
 
 > Note: the parser intentionally supports the simple YAML structure used for this project configuration.
 
+## Folder structure
+
+### Expected input structure
+
+The tool recognises a two-level convention used for IIA yearbook scans.  
+The critical segment is a directory named `extracted_pages_YYYY_YY` (where `YYYY` is the full four-digit year and `YY` is the two-digit end year).  
+The directory that sits **directly above** `extracted_pages_YYYY_YY` becomes the **yearbook** name.
+
+```text
+<input_root>/
+└── <yearbook>/                        ← any descriptive name, e.g. "trade"
+    └── extracted_pages_1938_39/       ← marks the year boundary; YYYY = 1938
+        ├── reviewed_466_475arrozimp_exp.xlsx        ← file directly inside
+        └── crops/                                   ← optional sub-topic folder
+            └── reviewed_239_239azucar_caña_brutaprod.xlsx
+```
+
+Files that do **not** sit inside any `extracted_pages_YYYY_YY` directory are still processed but land directly in the output root without any sub-directory nesting.
+
+### Generated output structure
+
+The output mirrors the input hierarchy under two levels of sanitized folder names:
+
+```text
+<output_root>/
+└── iia_extracted_pages_YYYY/          ← top-level year bucket, e.g. iia_extracted_pages_1938
+    ├── r_iia_<yearbook>_<year>_<start>_<end>_<product>.xlsx   ← file directly inside extracted_pages
+    └── iia_<subtopic>_YYYY/           ← only created when a sub-topic folder exists
+        └── r_iia_<yearbook>_<year>_<start>_<end>_<product>.xlsx
+```
+
+#### Concrete example
+
+Input tree:
+
+```text
+raw_inputs/
+└── trade/
+    └── extracted_pages_1938_39/
+        ├── reviewed_466_475arrozimp_exp.xlsx
+        └── crops/
+            └── reviewed_239_239azucar_caña_brutaprod.xlsx
+```
+
+Generated output tree:
+
+```text
+output/
+└── iia_extracted_pages_1938/
+    ├── r_iia_trade_1938_466_475_rice.xlsx
+    └── iia_crops_1938/
+        └── r_iia_trade_1938_239_239_raw_cane_sugar.xlsx
+```
+
+#### Folder and file name rules
+
+- Spaces in any folder or file name segment are replaced with `_`.
+- Consecutive underscores are collapsed to a single `_`.
+- Leading and trailing underscores are stripped.
+- The yearbook name is taken from the folder that sits immediately above `extracted_pages_YYYY_YY` and normalised with the rules above.
+- The product segment is stripped of trailing suffixes (`sup`, `prod`, `rend`, `imp`, `exp`, `num`) and then translated to its English equivalent using `product_translations` from the config.
+
 ## Usage
 
 Transform a single workbook:
@@ -102,14 +164,7 @@ Transform every workbook in a directory:
 iia-excel-reorg path/to/input_dir output/ --config config/example.units.yml
 ```
 
-Each generated workbook is written using the harmonized document name.
-
-Example:
-
-```text
-raw inputs/trade/extracted_pages_1938_39/reviewed_466_475arrozimp_exp.xlsx
-=> output/r_iia_trade_1938_466_475_rice.xlsx
-```
+Each generated workbook is written using the harmonized document name inside the automatically created output subdirectory.
 
 ## Transformation rules implemented
 

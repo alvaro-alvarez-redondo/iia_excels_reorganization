@@ -298,8 +298,11 @@ def test_sanitize_name_strips_leading_and_trailing_underscores() -> None:
     assert sanitize_name("_wheat_") == "wheat"
 
 
-def test_sanitize_name_combined_spaces_and_duplicates() -> None:
+def test_sanitize_name_combined_spaces_and_underscores() -> None:
     assert sanitize_name("iia  crops  1929") == "iia_crops_1929"
+
+
+def test_sanitize_name_combined_duplicate_underscores() -> None:
     assert sanitize_name("iia__crops__1929") == "iia_crops_1929"
 
 
