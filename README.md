@@ -18,7 +18,7 @@ The transformer currently supports the rules you specified:
 - preserves source cell colors on copied data rows
 - keeps repeated country/entity rows exactly as they appear in the source workbook
 - assigns `unit` automatically from the document category, sheet variable, and source product using the rules you provided
-- harmonizes reviewed document names into the canonical `r_iia_<yearbook>_<year>_<page_start>_<page_end>_<english_product>` format
+- harmonizes reviewed document names into the canonical `r_fao_<yearbook>_<year>_<page_start>_<page_end>_<english_product>` format
 - derives missing yearbook metadata from the folder path, for example `raw inputs/trade/extracted_pages_1938_39/...` becomes `trade` and `1938`
 - strips source suffixes such as `sup`, `prod`, `rend`, `imp`, `exp`, and `num` before translating the product portion of the document name
 - supports both the standard FAO unit rules and the special `inputs` unit rules
@@ -90,41 +90,119 @@ You can use the example file at `config/example.units.yml` as a starting point.
 
 ## Folder structure
 
-### Expected input structure
+### Where to place the input files
 
-The tool recognises a two-level convention used for IIA yearbook scans.  
-The critical segment is a directory named `extracted_pages_YYYY_YY` (where `YYYY` is the full four-digit year and `YY` is the two-digit end year).  
-The directory that sits **directly above** `extracted_pages_YYYY_YY` becomes the **yearbook** name.
+Drop your Excel workbooks into the **`raw inputs/`** folder at the root of this
+project.  That directory is already created and pre-structured to mirror the
+exact source layout described below.  Git ignores any `*.xlsx` / `*.xlsm` files
+inside it, so your source files won't be accidentally committed.
+
+```text
+raw inputs/                         ← place your source Excel files here
+├── area and production/
+│   ├── multiple product/
+│   │   ├── extracted_pages_1933_34/   ← drop .xlsx files in the appropriate year folder
+│   │   ├── extracted_pages_1938_39/
+│   │   └── extracted_pages_1939_45/
+│   └── single product/
+│       ├── extracted_pages_1909_21/
+│       ├── extracted_pages_1925_26/
+│       ├── extracted_pages_1929_30/
+│       ├── extracted_pages_1933_34/
+│       ├── extracted_pages_1938_39/
+│       └── extracted_pages_1939_45/
+├── country area/
+│   ├── extracted_pages_1909_21/
+│   ├── extracted_pages_1925_26/
+│   ├── extracted_pages_1929_30/
+│   ├── extracted_pages_1932_33/
+│   ├── extracted_pages_1933_34/
+│   └── extracted_pages_1938_39/
+├── inputs/
+│   ├── extracted_pages_1909_21/
+│   ├── extracted_pages_1925_26/
+│   ├── extracted_pages_1929_30/
+│   ├── extracted_pages_1933_34/
+│   ├── extracted_pages_1938_39/
+│   └── extracted_pages_1939_45/
+├── land use/
+│   ├── extracted_pages_1909_21/
+│   ├── extracted_pages_1925_26/
+│   ├── extracted_pages_1929_30/
+│   ├── extracted_pages_1932_33/
+│   ├── extracted_pages_1933_34/
+│   └── extracted_pages_1938_39/
+├── livestock/
+│   ├── extracted_pages_1909_21/
+│   ├── extracted_pages_1925_26/
+│   ├── extracted_pages_1929_30/
+│   ├── extracted_pages_1933_34/
+│   ├── extracted_pages_1938_39/
+│   └── extracted_pages_1939_45/
+└── trade/
+    ├── extracted_pages_1909_21/
+    ├── extracted_pages_1925_26/
+    ├── extracted_pages_1929_30/
+    ├── extracted_pages_1933_34/
+    └── extracted_pages_1938_39/
+```
+
+Transformed workbooks are written to **`10-raw_imports/`** (also at the project
+root).  That directory is pre-created and its generated `*.xlsx` files are
+gitignored.
+
+### Expected input structure (technical detail)
+
+The tool recognises a convention built around directories named
+`extracted_pages_YYYY_YY` (where `YYYY` is the full four-digit start year and
+`YY` is the two-digit end year).
 
 ```text
 <input_root>/
-└── <yearbook>/                        ← any descriptive name, e.g. "trade"
-    └── extracted_pages_1938_39/       ← marks the year boundary; YYYY = 1938
-        ├── reviewed_466_475arrozimp_exp.xlsx        ← file directly inside
-        └── crops/                                   ← optional sub-topic folder
+└── <topic>/                           ← e.g. "trade", "livestock"
+    └── extracted_pages_1938_39/       ← year boundary; YYYY = 1938
+        ├── reviewed_466_475arrozimp_exp.xlsx   ← directly inside
+        └── crops/                              ← optional sub-topic folder
             └── reviewed_239_239azucar_caña_brutaprod.xlsx
 ```
 
-Files that do **not** sit inside any `extracted_pages_YYYY_YY` directory are still processed but land directly in the output root without any sub-directory nesting.
+A two-level topic hierarchy is also supported:
+
+```text
+<input_root>/
+└── <main_topic>/                      ← e.g. "area and production"
+    └── <sub_topic>/                   ← e.g. "multiple product"
+        └── extracted_pages_1933_34/
+            └── reviewed_...xlsx
+```
+
+Files that do **not** sit inside any `extracted_pages_YYYY_YY` directory are
+still processed but land directly in the output root.
 
 ### Generated output structure
 
-The output mirrors the input hierarchy under two levels of sanitized folder names:
-
 ```text
-<output_root>/
-└── iia_extracted_pages_YYYY/          ← top-level year bucket, e.g. iia_extracted_pages_1938
-    ├── r_iia_<yearbook>_<year>_<start>_<end>_<product>.xlsx   ← file directly inside extracted_pages
-    └── iia_<subtopic>_YYYY/           ← only created when a sub-topic folder exists
-        └── r_iia_<yearbook>_<year>_<start>_<end>_<product>.xlsx
+10-raw_imports/
+└── fao_extracted_pages_YYYY/
+    └── fao_{topic}_YYYY/
+        └── r_fao_<topic>_<year>_<start>_<end>_<product>.xlsx
 ```
+
+The subfolder name is derived from:
+
+1. A directory sitting **between** `extracted_pages_*` and the workbook file
+   (e.g. `extracted_pages_*/crops/file.xlsx` → `fao_crops_YYYY`).
+2. Or, when the file is directly inside `extracted_pages_*`, the directory
+   **directly above** it (e.g. `trade/extracted_pages_*/file.xlsx`
+   → `fao_trade_YYYY`; `multiple product/extracted_pages_*/file.xlsx`
+   → `fao_multiple_product_YYYY`).
 
 #### Concrete example
 
-Input tree:
+Input:
 
 ```text
-raw_inputs/
+raw inputs/
 └── trade/
     └── extracted_pages_1938_39/
         ├── reviewed_466_475arrozimp_exp.xlsx
@@ -132,14 +210,15 @@ raw_inputs/
             └── reviewed_239_239azucar_caña_brutaprod.xlsx
 ```
 
-Generated output tree:
+Generated output:
 
 ```text
-output/
-└── iia_extracted_pages_1938/
-    ├── r_iia_trade_1938_466_475_rice.xlsx
-    └── iia_crops_1938/
-        └── r_iia_trade_1938_239_239_raw_cane_sugar.xlsx
+10-raw_imports/
+└── fao_extracted_pages_1938/
+    ├── fao_trade_1938/
+    │   └── r_fao_trade_1938_466_475_rice.xlsx
+    └── fao_crops_1938/
+        └── r_fao_trade_1938_239_239_raw_cane_sugar.xlsx
 ```
 
 #### Folder and file name rules
@@ -147,24 +226,34 @@ output/
 - Spaces in any folder or file name segment are replaced with `_`.
 - Consecutive underscores are collapsed to a single `_`.
 - Leading and trailing underscores are stripped.
-- The yearbook name is taken from the folder that sits immediately above `extracted_pages_YYYY_YY` and normalised with the rules above.
-- The product segment is stripped of trailing suffixes (`sup`, `prod`, `rend`, `imp`, `exp`, `num`) and then translated to its English equivalent using `product_translations` from the config.
+- The yearbook name is taken from the folder that sits immediately above
+  `extracted_pages_YYYY_YY` and normalised with the rules above.
+- The product segment is stripped of trailing suffixes (`sup`, `prod`, `rend`,
+  `imp`, `exp`, `num`) and then translated to English using
+  `product_translations` from the config.
 
 ## Usage
 
-Transform a single workbook:
+Once your Excel files are in place under `raw inputs/`, run the tool from the
+project root:
 
 ```bash
-iia-excel-reorg path/to/source.xlsx output/ --config config/example.units.yml
+# Use the conventional default paths (raw inputs/ → 10-raw_imports/)
+iia-excel-reorg --config config/example.units.yml
 ```
 
-Transform every workbook in a directory:
+You can also specify paths explicitly:
 
 ```bash
-iia-excel-reorg path/to/input_dir output/ --config config/example.units.yml
+# Single workbook
+iia-excel-reorg path/to/source.xlsx path/to/output/ --config config/example.units.yml
+
+# Entire directory tree
+iia-excel-reorg path/to/input_dir path/to/output/ --config config/example.units.yml
 ```
 
-Each generated workbook is written using the harmonized document name inside the automatically created output subdirectory.
+The `input` argument defaults to `raw inputs/` and the `output_dir` argument
+defaults to `10-raw_imports/` — both relative to the current working directory.
 
 ## Transformation rules implemented
 
@@ -218,7 +307,7 @@ If notes contain references to units, those references stay in `footnotes`; they
 Reviewed source names are converted with these rules:
 
 - `reviewed_` becomes `r_`
-- missing agency defaults to `iia`
+- missing agency defaults to `fao`
 - yearbook metadata comes from the folder path, for example `raw inputs/trade/extracted_pages_1938_39` becomes `trade` and `1938`
 - the product segment is stripped of trailing suffixes like `sup`, `prod`, `rend`, `imp`, `exp`, and `num`
 - the remaining product is translated to English for the output filename
@@ -226,8 +315,8 @@ Reviewed source names are converted with these rules:
 Examples:
 
 ```text
-reviewed_239_239azucar_caña_brutaprod -> r_iia_trade_1938_239_239_raw_cane_sugar
-reviewed_466_475arrozimp_exp -> r_iia_trade_1938_466_475_rice
+reviewed_239_239azucar_caña_brutaprod -> r_fao_trade_1938_239_239_raw_cane_sugar
+reviewed_466_475arrozimp_exp -> r_fao_trade_1938_466_475_rice
 ```
 
 ### Unit assignment

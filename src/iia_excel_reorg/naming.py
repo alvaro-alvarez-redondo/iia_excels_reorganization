@@ -89,7 +89,7 @@ def canonical_document_name(document_path: str | Path, product_translations: dic
     }
     english_product = translations.get(source_product, source_product)
     product_slug = english_product.replace(" ", "_")
-    raw = f"r_iia_{metadata['yearbook']}_{metadata['year']}_{match.group('start')}_{match.group('end')}_{product_slug}"
+    raw = f"r_fao_{metadata['yearbook']}_{metadata['year']}_{match.group('start')}_{match.group('end')}_{product_slug}"
     return sanitize_name(raw)
 
 
@@ -106,4 +106,4 @@ def infer_yearbook_metadata(document_path: str | Path) -> dict[str, str]:
             if idx > 0:
                 yearbook = sanitize_name(normalize_text(parts[idx - 1]))
             break
-    return {"agency": "iia", "yearbook": yearbook, "year": year}
+    return {"agency": "fao", "yearbook": yearbook, "year": year}

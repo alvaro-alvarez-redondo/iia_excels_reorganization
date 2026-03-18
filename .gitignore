@@ -1,3 +1,11 @@
 __pycache__/
 *.pyc
 *.egg-info/
+
+# Excel source files are placed in raw inputs/ but should not be committed
+raw inputs/**/*.xlsx
+raw inputs/**/*.xlsm
+
+# Transformed outputs written to 10-raw_imports/ are generated artefacts
+10-raw_imports/**/*.xlsx
+10-raw_imports/**/*.xlsm

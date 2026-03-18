@@ -18,11 +18,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "input",
-        help="Excel workbook file or directory containing workbook files.",
+        nargs="?",
+        default="raw inputs",
+        help="Excel workbook file or directory containing workbook files. "
+             "Defaults to the 'raw inputs/' folder in the current directory. "
+             "Quote the path when it contains spaces: \"raw inputs\".",
     )
     parser.add_argument(
         "output_dir",
-        help="Directory where transformed workbooks will be written.",
+        nargs="?",
+        default="10-raw_imports",
+        help="Directory where transformed workbooks will be written. "
+             "Defaults to '10-raw_imports/' in the current directory.",
     )
     parser.add_argument(
         "--config",
@@ -37,9 +44,18 @@ def _compute_output_subdir(workbook_path: Path) -> Path:
     When the path contains a directory matching ``extracted_pages_YYYY_YY`` the
     output hierarchy is built as::
 
-        iia_extracted_pages_YYYY/
-        └── iia_{subfolder}_YYYY/   (only when a subfolder sits between
-                                     extracted_pages_* and the workbook file)
+        fao_extracted_pages_YYYY/
+        └── fao_{subfolder}_YYYY/
+
+    The subfolder is determined in this order:
+
+    1. If a directory sits **between** ``extracted_pages_*`` and the workbook
+       file, its name is used (e.g. ``extracted_pages_*/crops/file.xlsx``
+       → ``fao_crops_YYYY``).
+    2. Otherwise the directory that sits **directly above**
+       ``extracted_pages_*`` is used (e.g. ``trade/extracted_pages_*/file.xlsx``
+       → ``fao_trade_YYYY``).  This handles the common structure where the
+       yearbook topic folder wraps the year directory.
 
     If no ``extracted_pages_*`` segment is found the file is placed directly in
     the output root (relative path ``Path(".")``).
@@ -49,11 +65,16 @@ def _compute_output_subdir(workbook_path: Path) -> Path:
         match = _EXTRACTED_PAGES_RE.match(part)
         if match:
             year = match.group("year")
-            parent_dir = f"iia_extracted_pages_{year}"
-            # Parts between the extracted_pages directory and the file itself
+            parent_dir = f"fao_extracted_pages_{year}"
+            # Priority 1: a subfolder between extracted_pages_* and the file
             intermediate = parts[idx + 1 : -1]
             if intermediate:
-                child_dir = sanitize_name(f"iia_{intermediate[0]}_{year}")
+                child_dir = sanitize_name(f"fao_{intermediate[0]}_{year}")
+                return Path(parent_dir) / child_dir
+            # Priority 2: the folder directly above extracted_pages_*
+            if idx > 0:
+                topic = parts[idx - 1]
+                child_dir = sanitize_name(f"fao_{topic}_{year}")
                 return Path(parent_dir) / child_dir
             return Path(parent_dir)
     return Path(".")
