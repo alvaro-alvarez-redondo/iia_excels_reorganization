@@ -1,0 +1,6 @@
+Metadata-Version: 2.1
+Name: iia-excel-reorg
+Version: 0.1.0
+Summary: Workflow to reorganize historical Excel workbooks into a standardized structure.
+Requires-Python: >=3.11
+Provides-Extra: dev

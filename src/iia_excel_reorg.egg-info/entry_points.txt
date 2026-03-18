@@ -1,0 +1,2 @@
+[console_scripts]
+iia-excel-reorg = iia_excel_reorg.cli:main

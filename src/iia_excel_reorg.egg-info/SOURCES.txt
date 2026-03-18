@@ -1,0 +1,16 @@
+README.md
+setup.py
+src/iia_excel_reorg/__init__.py
+src/iia_excel_reorg/cli.py
+src/iia_excel_reorg/config.py
+src/iia_excel_reorg/naming.py
+src/iia_excel_reorg/transformer.py
+src/iia_excel_reorg/unit_rules.py
+src/iia_excel_reorg/xlsx_io.py
+src/iia_excel_reorg.egg-info/PKG-INFO
+src/iia_excel_reorg.egg-info/SOURCES.txt
+src/iia_excel_reorg.egg-info/dependency_links.txt
+src/iia_excel_reorg.egg-info/entry_points.txt
+src/iia_excel_reorg.egg-info/requires.txt
+src/iia_excel_reorg.egg-info/top_level.txt
+tests/test_transformer.py
