@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from iia_excel_reorg.cli import _compute_output_subdir, _iter_workbooks_structured
 from iia_excel_reorg.config import load_config
 from iia_excel_reorg.naming import canonical_document_name, extract_source_product, infer_yearbook_metadata
 from iia_excel_reorg.transformer import transform_workbook
@@ -187,3 +188,94 @@ def test_load_config_parses_rule_based_yaml(tmp_path: Path) -> None:
     assert config.product_translations["arroz"] == "rice"
     assert config.unit_overrides["imports"] == "tonnes"
     assert config.include_sheets == ["AREA", "PRODUCTION"]
+
+
+
+def test_compute_output_subdir_with_extracted_pages_and_subfolder() -> None:
+    # Excel file nested under extracted_pages_YYYY_YY/subfolder/
+    path = Path("inputs/reviewed_iia/extracted_pages_1929_30/crops/reviewed_1_2_wheat.xlsx")
+    result = _compute_output_subdir(path)
+    assert result == Path("iia_extracted_pages_1929/iia_crops_1929")
+
+
+
+def test_compute_output_subdir_with_extracted_pages_no_subfolder() -> None:
+    # Excel file directly inside extracted_pages_YYYY_YY/
+    path = Path("inputs/reviewed_iia/extracted_pages_1938_39/reviewed_466_475arroz.xlsx")
+    result = _compute_output_subdir(path)
+    assert result == Path("iia_extracted_pages_1938")
+
+
+
+def test_compute_output_subdir_without_extracted_pages() -> None:
+    # Excel file with no extracted_pages_* segment → placed in output root
+    path = Path("some/other/dir/workbook.xlsx")
+    result = _compute_output_subdir(path)
+    assert result == Path(".")
+
+
+
+def test_iter_workbooks_structured_builds_correct_hierarchy(tmp_path: Path) -> None:
+    # Set up an input tree with two extracted_pages folders and a subfolder
+    crops_dir = tmp_path / "reviewed_iia" / "extracted_pages_1929_30" / "crops"
+    trade_dir = tmp_path / "reviewed_iia" / "extracted_pages_1938_39" / "trade"
+    crops_dir.mkdir(parents=True)
+    trade_dir.mkdir(parents=True)
+
+    wb1 = crops_dir / "reviewed_1_2_wheat.xlsx"
+    wb2 = trade_dir / "reviewed_3_4_rice.xlsx"
+
+    # Create minimal xlsx files so rglob finds them
+    _build_source_workbook(wb1)
+    _build_source_workbook(wb2)
+
+    entries = _iter_workbooks_structured(tmp_path)
+
+    paths_and_subdirs = {e[0].name: e[1] for e in entries}
+    assert paths_and_subdirs["reviewed_1_2_wheat.xlsx"] == Path("iia_extracted_pages_1929/iia_crops_1929")
+    assert paths_and_subdirs["reviewed_3_4_rice.xlsx"] == Path("iia_extracted_pages_1938/iia_trade_1938")
+
+
+
+def test_cli_main_creates_structured_output(tmp_path: Path) -> None:
+    """end-to-end: main() populates the iia_extracted_pages_*/iia_*_* hierarchy."""
+    from iia_excel_reorg.cli import main
+
+    crops_dir = tmp_path / "inputs" / "reviewed_iia" / "extracted_pages_1929_30" / "crops"
+    crops_dir.mkdir(parents=True)
+    source = crops_dir / "reviewed_1_2_wheat.xlsx"
+    _build_source_workbook(source)
+
+    output_root = tmp_path / "outputs"
+
+    config_path = tmp_path / "config.yml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "unit_mode: standard",
+                "document_categories:",
+                "  reviewed_1_2_wheat: 1",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    import sys
+    orig_argv = sys.argv
+    try:
+        sys.argv = [
+            "iia-excel-reorg",
+            str(tmp_path / "inputs"),
+            str(output_root),
+            "--config",
+            str(config_path),
+        ]
+        main()
+    finally:
+        sys.argv = orig_argv
+
+    # The transformed file must land in iia_extracted_pages_1929/iia_crops_1929/
+    output_subdir = output_root / "iia_extracted_pages_1929" / "iia_crops_1929"
+    assert output_subdir.is_dir(), f"Expected output subdir not found: {output_subdir}"
+    xlsx_files = list(output_subdir.glob("*.xlsx"))
+    assert len(xlsx_files) == 1
