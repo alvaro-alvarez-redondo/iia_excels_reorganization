@@ -2,6 +2,109 @@
 
 This repository contains a complete Python workflow for reorganizing historical Excel workbooks into a standardized workbook structure.
 
+## Workflow summary
+
+The diagram below shows the complete pipeline from raw Excel scans to
+structured, analysis-ready workbooks.
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│  1. INPUT  –  place historical .xlsx scans in raw inputs/           │
+│                                                                     │
+│  raw inputs/                                                        │
+│  ├── trade/extracted_pages_1938_39/reviewed_466_475arrozimp.xlsx    │
+│  ├── livestock/extracted_pages_1933_34/reviewed_12_15cattle.xlsx    │
+│  └── area and production/                                           │
+│      └── multiple product/extracted_pages_1939_45/reviewed_…xlsx   │
+└────────────────────────┬────────────────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│  2. CONFIGURE  –  create (or reuse) a YAML config file              │
+│                                                                     │
+│  config/example.units.yml defines:                                  │
+│  • unit_mode       standard | inputs                                │
+│  • document_categories   stem → category number                     │
+│  • product_aliases       source product → canonical product         │
+│  • product_translations  canonical product → English slug           │
+│  • unit_overrides        sheet (or doc:sheet) → explicit unit       │
+│  • include_sheets        optional list of sheets to process         │
+└────────────────────────┬────────────────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│  3. RUN  –  execute the CLI from the project root                   │
+│                                                                     │
+│  iia-excel-reorg --config config/example.units.yml                  │
+│  (defaults: input = "raw inputs/", output = "10-raw_imports/")      │
+└────────────────────────┬────────────────────────────────────────────┘
+                         │
+                  per workbook file
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│  4. DISCOVER  –  cli._iter_workbooks_structured()                   │
+│                                                                     │
+│  Recursively finds every *.xlsx / *.xlsm file and maps it to an    │
+│  output subdirectory by inspecting the extracted_pages_YYYY_YY      │
+│  segment in its path:                                               │
+│  • subfolder below extracted_pages_* (e.g. crops/) → fao_crops_*   │
+│  • otherwise: folder above extracted_pages_* (e.g. trade/)         │
+│    → fao_trade_*                                                    │
+└────────────────────────┬────────────────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│  5. NAME  –  naming.canonical_document_name()                       │
+│                                                                     │
+│  reviewed_466_475arrozimp_exp.xlsx                                  │
+│        │                                                            │
+│        ├─ strip "reviewed_" → r_                                    │
+│        ├─ infer agency (fao) + yearbook + year from folder path     │
+│        ├─ extract product body, strip known suffixes (imp, exp, …)  │
+│        ├─ apply product_aliases then product_translations           │
+│        └─ assemble: r_fao_trade_1938_466_475_rice                   │
+└────────────────────────┬────────────────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│  6. TRANSFORM  –  transformer.transform_workbook()                  │
+│                                                                     │
+│  For every sheet in the source workbook:                            │
+│  a) Read row 1 → extract year / period headers                      │
+│  b) Walk remaining rows:                                            │
+│     • HÉMISPHÈRE row  → update hemisphere state (not written)       │
+│     • Continent row   → update continent state  (not written)       │
+│     • Country row     → extract country name + footnotes from (…)   │
+│  c) Assign unit via unit_rules.assign_unit(variable, product, cat)  │
+│  d) Write output row:                                               │
+│     hemisphere | continent | country | unit | footnotes | yr cols   │
+│  e) Preserve source cell fill colours on every copied cell          │
+│  f) Write sheet with name lowercased                                │
+└────────────────────────┬────────────────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│  7. OUTPUT  –  results land in 10-raw_imports/                      │
+│                                                                     │
+│  10-raw_imports/                                                    │
+│  └── fao_extracted_pages_1938/                                      │
+│      └── fao_trade_1938/                                            │
+│          └── r_fao_trade_1938_466_475_rice.xlsx                     │
+│              ┌──────────────────────────────────────────────┐       │
+│              │ hemisphere│continent│country│unit│footnotes│…│       │
+│              │ N         │ EUROPE  │France │1000q│        │…│       │
+│              └──────────────────────────────────────────────┘       │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+**In short:** drop your scanned Excel files into `raw inputs/`, point the
+CLI at your config, and the tool produces one clean, consistently structured
+workbook per source file inside `10-raw_imports/`, organised into
+`fao_extracted_pages_YYYY/fao_{topic}_YYYY/` subdirectories.
+
+---
+
 ## What the workflow does
 
 The transformer currently supports the rules you specified:
@@ -18,7 +121,7 @@ The transformer currently supports the rules you specified:
 - preserves source cell colors on copied data rows
 - keeps repeated country/entity rows exactly as they appear in the source workbook
 - assigns `unit` automatically from the document category, sheet variable, and source product using the rules you provided
-- harmonizes reviewed document names into the canonical `r_iia_<yearbook>_<year>_<page_start>_<page_end>_<english_product>` format
+- harmonizes reviewed document names into the canonical `r_fao_<yearbook>_<year>_<page_start>_<page_end>_<english_product>` format
 - derives missing yearbook metadata from the folder path, for example `raw inputs/trade/extracted_pages_1938_39/...` becomes `trade` and `1938`
 - strips source suffixes such as `sup`, `prod`, `rend`, `imp`, `exp`, and `num` before translating the product portion of the document name
 - supports both the standard FAO unit rules and the special `inputs` unit rules
@@ -88,28 +191,172 @@ You can use the example file at `config/example.units.yml` as a starting point.
 
 > Note: the parser intentionally supports the simple YAML structure used for this project configuration.
 
-## Usage
+## Folder structure
 
-Transform a single workbook:
+### Where to place the input files
 
-```bash
-iia-excel-reorg path/to/source.xlsx output/ --config config/example.units.yml
-```
-
-Transform every workbook in a directory:
-
-```bash
-iia-excel-reorg path/to/input_dir output/ --config config/example.units.yml
-```
-
-Each generated workbook is written using the harmonized document name.
-
-Example:
+Drop your Excel workbooks into the **`raw inputs/`** folder at the root of this
+project.  That directory is already created and pre-structured to mirror the
+exact source layout described below.  Git ignores any `*.xlsx` / `*.xlsm` files
+inside it, so your source files won't be accidentally committed.
 
 ```text
-raw inputs/trade/extracted_pages_1938_39/reviewed_466_475arrozimp_exp.xlsx
-=> output/r_iia_trade_1938_466_475_rice.xlsx
+raw inputs/                         ← place your source Excel files here
+├── area and production/
+│   ├── multiple product/
+│   │   ├── extracted_pages_1933_34/   ← drop .xlsx files in the appropriate year folder
+│   │   ├── extracted_pages_1938_39/
+│   │   └── extracted_pages_1939_45/
+│   └── single product/
+│       ├── extracted_pages_1909_21/
+│       ├── extracted_pages_1925_26/
+│       ├── extracted_pages_1929_30/
+│       ├── extracted_pages_1933_34/
+│       ├── extracted_pages_1938_39/
+│       └── extracted_pages_1939_45/
+├── country area/
+│   ├── extracted_pages_1909_21/
+│   ├── extracted_pages_1925_26/
+│   ├── extracted_pages_1929_30/
+│   ├── extracted_pages_1932_33/
+│   ├── extracted_pages_1933_34/
+│   └── extracted_pages_1938_39/
+├── inputs/
+│   ├── extracted_pages_1909_21/
+│   ├── extracted_pages_1925_26/
+│   ├── extracted_pages_1929_30/
+│   ├── extracted_pages_1933_34/
+│   ├── extracted_pages_1938_39/
+│   └── extracted_pages_1939_45/
+├── land use/
+│   ├── extracted_pages_1909_21/
+│   ├── extracted_pages_1925_26/
+│   ├── extracted_pages_1929_30/
+│   ├── extracted_pages_1932_33/
+│   ├── extracted_pages_1933_34/
+│   └── extracted_pages_1938_39/
+├── livestock/
+│   ├── extracted_pages_1909_21/
+│   ├── extracted_pages_1925_26/
+│   ├── extracted_pages_1929_30/
+│   ├── extracted_pages_1933_34/
+│   ├── extracted_pages_1938_39/
+│   └── extracted_pages_1939_45/
+└── trade/
+    ├── extracted_pages_1909_21/
+    ├── extracted_pages_1925_26/
+    ├── extracted_pages_1929_30/
+    ├── extracted_pages_1933_34/
+    └── extracted_pages_1938_39/
 ```
+
+Transformed workbooks are written to **`10-raw_imports/`** (also at the project
+root).  That directory is pre-created and its generated `*.xlsx` files are
+gitignored.
+
+### Expected input structure (technical detail)
+
+The tool recognises a convention built around directories named
+`extracted_pages_YYYY_YY` (where `YYYY` is the full four-digit start year and
+`YY` is the two-digit end year).
+
+```text
+<input_root>/
+└── <topic>/                           ← e.g. "trade", "livestock"
+    └── extracted_pages_1938_39/       ← year boundary; YYYY = 1938
+        ├── reviewed_466_475arrozimp_exp.xlsx   ← directly inside
+        └── crops/                              ← optional sub-topic folder
+            └── reviewed_239_239azucar_caña_brutaprod.xlsx
+```
+
+A two-level topic hierarchy is also supported:
+
+```text
+<input_root>/
+└── <main_topic>/                      ← e.g. "area and production"
+    └── <sub_topic>/                   ← e.g. "multiple product"
+        └── extracted_pages_1933_34/
+            └── reviewed_...xlsx
+```
+
+Files that do **not** sit inside any `extracted_pages_YYYY_YY` directory are
+still processed but land directly in the output root.
+
+### Generated output structure
+
+```text
+10-raw_imports/
+└── fao_extracted_pages_YYYY/
+    └── fao_{topic}_YYYY/
+        └── r_fao_<topic>_<year>_<start>_<end>_<product>.xlsx
+```
+
+The subfolder name is derived from:
+
+1. A directory sitting **between** `extracted_pages_*` and the workbook file
+   (e.g. `extracted_pages_*/crops/file.xlsx` → `fao_crops_YYYY`).
+2. Or, when the file is directly inside `extracted_pages_*`, the directory
+   **directly above** it (e.g. `trade/extracted_pages_*/file.xlsx`
+   → `fao_trade_YYYY`; `multiple product/extracted_pages_*/file.xlsx`
+   → `fao_multiple_product_YYYY`).
+
+#### Concrete example
+
+Input:
+
+```text
+raw inputs/
+└── trade/
+    └── extracted_pages_1938_39/
+        ├── reviewed_466_475arrozimp_exp.xlsx
+        └── crops/
+            └── reviewed_239_239azucar_caña_brutaprod.xlsx
+```
+
+Generated output:
+
+```text
+10-raw_imports/
+└── fao_extracted_pages_1938/
+    ├── fao_trade_1938/
+    │   └── r_fao_trade_1938_466_475_rice.xlsx
+    └── fao_crops_1938/
+        └── r_fao_trade_1938_239_239_raw_cane_sugar.xlsx
+```
+
+#### Folder and file name rules
+
+- Spaces in any folder or file name segment are replaced with `_`.
+- Consecutive underscores are collapsed to a single `_`.
+- Leading and trailing underscores are stripped.
+- The yearbook name is taken from the folder that sits immediately above
+  `extracted_pages_YYYY_YY` and normalised with the rules above.
+- The product segment is stripped of trailing suffixes (`sup`, `prod`, `rend`,
+  `imp`, `exp`, `num`) and then translated to English using
+  `product_translations` from the config.
+
+## Usage
+
+Once your Excel files are in place under `raw inputs/`, run the tool from the
+project root:
+
+```bash
+# Use the conventional default paths (raw inputs/ → 10-raw_imports/)
+iia-excel-reorg --config config/example.units.yml
+```
+
+You can also specify paths explicitly:
+
+```bash
+# Single workbook
+iia-excel-reorg path/to/source.xlsx path/to/output/ --config config/example.units.yml
+
+# Entire directory tree
+iia-excel-reorg path/to/input_dir path/to/output/ --config config/example.units.yml
+```
+
+The `input` argument defaults to `raw inputs/` and the `output_dir` argument
+defaults to `10-raw_imports/` — both relative to the current working directory.
 
 ## Transformation rules implemented
 
@@ -163,7 +410,7 @@ If notes contain references to units, those references stay in `footnotes`; they
 Reviewed source names are converted with these rules:
 
 - `reviewed_` becomes `r_`
-- missing agency defaults to `iia`
+- missing agency defaults to `fao`
 - yearbook metadata comes from the folder path, for example `raw inputs/trade/extracted_pages_1938_39` becomes `trade` and `1938`
 - the product segment is stripped of trailing suffixes like `sup`, `prod`, `rend`, `imp`, `exp`, and `num`
 - the remaining product is translated to English for the output filename
@@ -171,8 +418,8 @@ Reviewed source names are converted with these rules:
 Examples:
 
 ```text
-reviewed_239_239azucar_caña_brutaprod -> r_iia_trade_1938_239_239_raw_cane_sugar
-reviewed_466_475arrozimp_exp -> r_iia_trade_1938_466_475_rice
+reviewed_239_239azucar_caña_brutaprod -> r_fao_trade_1938_239_239_raw_cane_sugar
+reviewed_466_475arrozimp_exp -> r_fao_trade_1938_466_475_rice
 ```
 
 ### Unit assignment

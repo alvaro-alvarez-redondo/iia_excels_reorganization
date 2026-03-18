@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from iia_excel_reorg.cli import _compute_output_subdir, _iter_workbooks_structured
 from iia_excel_reorg.config import load_config
-from iia_excel_reorg.naming import canonical_document_name, extract_source_product, infer_yearbook_metadata
+from iia_excel_reorg.naming import canonical_document_name, extract_source_product, infer_yearbook_metadata, sanitize_name
 from iia_excel_reorg.transformer import transform_workbook
 from iia_excel_reorg.unit_rules import assign_unit
 from iia_excel_reorg.xlsx_io import SheetData, WorkbookData, read_workbook, write_workbook
@@ -132,7 +133,7 @@ def test_transform_workbook_supports_inputs_mode_and_harmonized_output_names(tmp
     output_path = output_dir / f"{config.canonical_name_for_document(source_path)}.xlsx"
     transform_workbook(source_path, output_path, config=config)
 
-    assert output_path.name == "r_iia_trade_1938_466_475_rice.xlsx"
+    assert output_path.name == "r_fao_trade_1938_466_475_rice.xlsx"
     result = read_workbook(output_path)
     imports = result.sheets[2]
     assert imports.name == "imports"
@@ -146,9 +147,9 @@ def test_transform_workbook_supports_inputs_mode_and_harmonized_output_names(tmp
 
 def test_naming_and_unit_rules_cover_reviewed_documents() -> None:
     path = Path("raw inputs/trade/extracted_pages_1938_39/reviewed_239_239azucar_caña_brutaprod.xlsx")
-    assert infer_yearbook_metadata(path) == {"agency": "iia", "yearbook": "trade", "year": "1938"}
+    assert infer_yearbook_metadata(path) == {"agency": "fao", "yearbook": "trade", "year": "1938"}
     assert extract_source_product(path) == "azucar cana bruta"
-    assert canonical_document_name(path) == "r_iia_trade_1938_239_239_raw_cane_sugar"
+    assert canonical_document_name(path) == "r_fao_trade_1938_239_239_raw_cane_sugar"
     assert assign_unit("imports", "te", 1) == "tonnes"
     assert assign_unit("imports", "te", 2) == "q"
     assert assign_unit("production", "vino", 1) == "1000 hl"
@@ -187,3 +188,150 @@ def test_load_config_parses_rule_based_yaml(tmp_path: Path) -> None:
     assert config.product_translations["arroz"] == "rice"
     assert config.unit_overrides["imports"] == "tonnes"
     assert config.include_sheets == ["AREA", "PRODUCTION"]
+
+
+
+def test_compute_output_subdir_with_extracted_pages_and_subfolder() -> None:
+    # Excel file nested under extracted_pages_YYYY_YY/subfolder/
+    path = Path("inputs/reviewed_fao/extracted_pages_1929_30/crops/reviewed_1_2_wheat.xlsx")
+    result = _compute_output_subdir(path)
+    assert result == Path("fao_extracted_pages_1929/fao_crops_1929")
+
+
+
+def test_compute_output_subdir_with_extracted_pages_no_subfolder() -> None:
+    # Excel file directly inside extracted_pages_YYYY_YY/ with a topic folder above.
+    # The parent folder (trade) is used as the output subfolder.
+    path = Path("raw_inputs/trade/extracted_pages_1938_39/reviewed_466_475arroz.xlsx")
+    result = _compute_output_subdir(path)
+    assert result == Path("fao_extracted_pages_1938/fao_trade_1938")
+
+
+
+def test_compute_output_subdir_with_deep_nesting() -> None:
+    # Excel file two levels below the topic root: topic/sub_category/extracted_pages_*/file.xlsx
+    # The sub_category folder (directly above extracted_pages_*) becomes the output subfolder.
+    path = Path("raw_inputs/area and production/multiple product/extracted_pages_1933_34/wb.xlsx")
+    result = _compute_output_subdir(path)
+    assert result == Path("fao_extracted_pages_1933/fao_multiple_product_1933")
+
+
+
+    # Excel file with no extracted_pages_* segment → placed in output root
+    path = Path("some/other/dir/workbook.xlsx")
+    result = _compute_output_subdir(path)
+    assert result == Path(".")
+
+
+
+def test_iter_workbooks_structured_builds_correct_hierarchy(tmp_path: Path) -> None:
+    # Set up an input tree with two extracted_pages folders and a subfolder
+    crops_dir = tmp_path / "reviewed_fao" / "extracted_pages_1929_30" / "crops"
+    trade_dir = tmp_path / "reviewed_fao" / "extracted_pages_1938_39" / "trade"
+    crops_dir.mkdir(parents=True)
+    trade_dir.mkdir(parents=True)
+
+    wb1 = crops_dir / "reviewed_1_2_wheat.xlsx"
+    wb2 = trade_dir / "reviewed_3_4_rice.xlsx"
+
+    # Create minimal xlsx files so rglob finds them
+    _build_source_workbook(wb1)
+    _build_source_workbook(wb2)
+
+    entries = _iter_workbooks_structured(tmp_path)
+
+    paths_and_subdirs = {e[0].name: e[1] for e in entries}
+    assert paths_and_subdirs["reviewed_1_2_wheat.xlsx"] == Path("fao_extracted_pages_1929/fao_crops_1929")
+    assert paths_and_subdirs["reviewed_3_4_rice.xlsx"] == Path("fao_extracted_pages_1938/fao_trade_1938")
+
+
+
+def test_cli_main_creates_structured_output(tmp_path: Path) -> None:
+    """end-to-end: main() populates the fao_extracted_pages_*/fao_*_* hierarchy."""
+    from iia_excel_reorg.cli import main
+
+    crops_dir = tmp_path / "inputs" / "reviewed_fao" / "extracted_pages_1929_30" / "crops"
+    crops_dir.mkdir(parents=True)
+    source = crops_dir / "reviewed_1_2_wheat.xlsx"
+    _build_source_workbook(source)
+
+    output_root = tmp_path / "outputs"
+
+    config_path = tmp_path / "config.yml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "unit_mode: standard",
+                "document_categories:",
+                "  reviewed_1_2_wheat: 1",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    import sys
+    orig_argv = sys.argv
+    try:
+        sys.argv = [
+            "iia-excel-reorg",
+            str(tmp_path / "inputs"),
+            str(output_root),
+            "--config",
+            str(config_path),
+        ]
+        main()
+    finally:
+        sys.argv = orig_argv
+
+    # The transformed file must land in fao_extracted_pages_1929/fao_crops_1929/
+    output_subdir = output_root / "fao_extracted_pages_1929" / "fao_crops_1929"
+    assert output_subdir.is_dir(), f"Expected output subdir not found: {output_subdir}"
+    xlsx_files = list(output_subdir.glob("*.xlsx"))
+    assert len(xlsx_files) == 1
+
+
+
+# ---------------------------------------------------------------------------
+# sanitize_name unit tests
+# ---------------------------------------------------------------------------
+
+def test_sanitize_name_replaces_spaces_with_underscores() -> None:
+    assert sanitize_name("raw cane sugar") == "raw_cane_sugar"
+
+
+def test_sanitize_name_collapses_duplicate_underscores() -> None:
+    assert sanitize_name("r_iia__trade__1938") == "r_iia_trade_1938"
+
+
+def test_sanitize_name_strips_leading_and_trailing_underscores() -> None:
+    assert sanitize_name("_wheat_") == "wheat"
+
+
+def test_sanitize_name_combined_spaces_and_underscores() -> None:
+    assert sanitize_name("iia  crops  1929") == "iia_crops_1929"
+
+
+def test_sanitize_name_combined_duplicate_underscores() -> None:
+    assert sanitize_name("iia__crops__1929") == "iia_crops_1929"
+
+
+def test_sanitize_name_no_change_when_already_clean() -> None:
+    assert sanitize_name("r_iia_trade_1938_466_475_rice") == "r_iia_trade_1938_466_475_rice"
+
+
+def test_canonical_document_name_has_no_duplicate_underscores() -> None:
+    # Folder name "my trade" has a space → yearbook becomes "my_trade" (no double underscores)
+    path = Path("inputs/my trade/extracted_pages_1938_39/reviewed_1_2_wheat.xlsx")
+    name = canonical_document_name(path)
+    assert " " not in name
+    assert "__" not in name
+    assert name == "r_fao_my_trade_1938_1_2_wheat"
+
+
+def test_compute_output_subdir_sanitizes_space_in_folder_name() -> None:
+    # Intermediate folder "my crops" has a space → must become "fao_my_crops_1929"
+    path = Path("inputs/reviewed_fao/extracted_pages_1929_30/my crops/reviewed_1_2.xlsx")
+    result = _compute_output_subdir(path)
+    assert " " not in str(result)
+    assert "__" not in str(result)
+    assert result == Path("fao_extracted_pages_1929/fao_my_crops_1929")

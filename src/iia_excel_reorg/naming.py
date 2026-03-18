@@ -9,6 +9,21 @@ REVIEWED_PREFIX = "reviewed_"
 REVIEWED_RE = re.compile(r"^reviewed_(?P<start>\d+)_(?P<end>\d+)(?P<body>.+)$", re.IGNORECASE)
 EXTRACTED_PAGES_RE = re.compile(r"^extracted_pages_(?P<year>\d{4})_\d{2}$", re.IGNORECASE)
 SUFFIXES = ("sup", "prod", "rend", "imp", "exp", "num")
+_MULTI_UNDERSCORE_RE = re.compile(r"_+")
+
+
+
+def sanitize_name(name: str) -> str:
+    """Return *name* with spaces replaced by ``_``, consecutive underscores collapsed, and leading/trailing underscores stripped.
+
+    The result is a clean identifier suitable for folder names and Excel
+    filenames.
+    """
+    result = name.replace(" ", "_")
+    result = _MULTI_UNDERSCORE_RE.sub("_", result)
+    return result.strip("_")
+
+
 DEFAULT_PRODUCT_TRANSLATIONS = {
     "azucar cana bruta": "raw cane sugar",
     "arroz": "rice",
@@ -74,7 +89,8 @@ def canonical_document_name(document_path: str | Path, product_translations: dic
     }
     english_product = translations.get(source_product, source_product)
     product_slug = english_product.replace(" ", "_")
-    return f"r_iia_{metadata['yearbook']}_{metadata['year']}_{match.group('start')}_{match.group('end')}_{product_slug}"
+    raw = f"r_fao_{metadata['yearbook']}_{metadata['year']}_{match.group('start')}_{match.group('end')}_{product_slug}"
+    return sanitize_name(raw)
 
 
 
@@ -88,6 +104,6 @@ def infer_yearbook_metadata(document_path: str | Path) -> dict[str, str]:
         if match:
             year = match.group("year")
             if idx > 0:
-                yearbook = normalize_text(parts[idx - 1]).replace(" ", "_")
+                yearbook = sanitize_name(normalize_text(parts[idx - 1]))
             break
-    return {"agency": "iia", "yearbook": yearbook, "year": year}
+    return {"agency": "fao", "yearbook": yearbook, "year": year}
