@@ -113,11 +113,7 @@ def canonical_document_name(
 
     metadata = infer_yearbook_metadata(path)
     source_product = extract_source_product(path)
-    translations = {
-        **DEFAULT_PRODUCT_TRANSLATIONS,
-        **{normalize_text(key): normalize_text(value) for key, value in (product_translations or {}).items()},
-    }
-    english_product = translations.get(source_product, _auto_translate_product(source_product))
+    english_product = translate_product_name(source_product, product_translations)
     product_slug = english_product.replace(" ", "_")
     raw = f"r_iia_{metadata['yearbook']}_{metadata['year']}_{match.group('start')}_{match.group('end')}_{product_slug}"
     return sanitize_name(raw)
