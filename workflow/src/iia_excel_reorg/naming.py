@@ -101,6 +101,7 @@ def extract_source_product(document_path: str | Path) -> str:
 def canonical_document_name(
     document_path: str | Path,
     product_translations: dict[str, str] | None = None,
+    product_aliases: dict[str, str] | None = None,
 ) -> str:
     path = Path(document_path)
     stem = path.stem
@@ -113,7 +114,12 @@ def canonical_document_name(
 
     metadata = infer_yearbook_metadata(path)
     source_product = extract_source_product(path)
-    english_product = translate_product_name(source_product, product_translations)
+    normalized_aliases = {
+        normalize_text(key): normalize_text(value)
+        for key, value in (product_aliases or {}).items()
+    }
+    canonical_product = normalized_aliases.get(source_product, source_product)
+    english_product = translate_product_name(canonical_product, product_translations)
     product_slug = english_product.replace(" ", "_")
     raw = f"r_iia_{metadata['yearbook']}_{metadata['year']}_{match.group('start')}_{match.group('end')}_{product_slug}"
     return sanitize_name(raw)
