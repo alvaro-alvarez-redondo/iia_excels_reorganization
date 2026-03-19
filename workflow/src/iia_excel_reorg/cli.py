@@ -16,6 +16,7 @@ _EXCEL_PATTERNS = ("*.xlsx", "*.xlsm")
 DEFAULT_INPUT_DIR = Path("data/raw_inputs")
 DEFAULT_OUTPUT_DIR = Path("data/10-raw_imports")
 GEOGRAPHY_INDEX_FILENAME = "unique_geography_values.txt"
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -176,7 +177,7 @@ def main() -> None:
 
     _run_progress("Reorganizing folders", workbook_entries, prepare_output)
     _run_progress("Reorganizing excels", workbook_entries, transform_entry)
-    geography_index.write_txt(output_root / GEOGRAPHY_INDEX_FILENAME)
+    geography_index.write_txt(PROJECT_ROOT / GEOGRAPHY_INDEX_FILENAME)
 
 
 if __name__ == "__main__":
