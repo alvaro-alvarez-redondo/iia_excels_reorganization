@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import importlib.util
 from pathlib import Path
 
 from iia_excel_reorg.cli import _compute_output_subdir, _ensure_workspace, _iter_workbooks_structured
@@ -262,20 +263,34 @@ def test_canonical_document_name_auto_translates_unknown_products(monkeypatch) -
 def test_canonical_document_name_applies_alias_before_translation() -> None:
     path = Path("raw_inputs/trade/extracted_pages_1938_39/reviewed_12_13teaimp.xlsx")
 
-    assert canonical_document_name(path, product_aliases={"tea": "te"}) == "r_iia_trade_1938_12_13_tea"
+    assert canonical_document_name(
+        path,
+        product_translations={"te": "tea"},
+        product_aliases={"tea": "te"},
+    ) == "r_iia_trade_1938_12_13_tea"
 
 
 def test_naming_and_unit_rules_cover_reviewed_documents() -> None:
     path = Path("raw_inputs/trade/extracted_pages_1938_39/reviewed_239_239azucar_caña_brutaprod.xlsx")
     assert infer_yearbook_metadata(path) == {"agency": "iia", "yearbook": "trade", "year": "1938"}
     assert extract_source_product(path) == "azucar cana bruta"
-    assert canonical_document_name(path) == "r_iia_trade_1938_239_239_raw_cane_sugar"
+    assert canonical_document_name(path, product_translations={"azucar cana bruta": "raw cane sugar"}) == "r_iia_trade_1938_239_239_raw_cane_sugar"
     assert assign_unit("imports", "te", 1) == "tonnes"
     assert assign_unit("imports", "te", 2) == "q"
     assert assign_unit("production", "vino", 1) == "1000 hl"
     assert assign_unit("production", "huevos", 2) == "1000 eggs"
     assert assign_unit("livestock", "whatever", 1) == "1000 heads"
     assert assign_unit("production", "whatever", None) == ""
+
+
+def test_canonical_document_name_translates_multiword_reviewed_product_at_end(monkeypatch) -> None:
+    from iia_excel_reorg import naming
+
+    monkeypatch.setattr(naming, "_auto_translate_product", lambda value: "raw beet sugar")
+    path = Path("raw_inputs/trade/extracted_pages_1938_39/reviewed_238_238azucar_remolacha_brutaprod.xlsx")
+
+    assert extract_source_product(path) == "azucar remolacha bruta"
+    assert canonical_document_name(path) == "r_iia_trade_1938_238_238_raw_beet_sugar"
 
 
 
@@ -311,10 +326,30 @@ def test_load_config_parses_rule_based_yaml(tmp_path: Path) -> None:
 
 
 def test_workbook_config_canonical_name_uses_product_aliases() -> None:
-    config = WorkbookConfig(product_aliases={"tea": "te"})
+    config = WorkbookConfig(product_aliases={"tea": "te"}, product_translations={"te": "tea"})
     path = Path("raw_inputs/trade/extracted_pages_1938_39/reviewed_12_13teaimp.xlsx")
 
     assert config.canonical_name_for_document(path) == "r_iia_trade_1938_12_13_tea"
+
+
+def test_run_project_bootstraps_deep_translator(monkeypatch) -> None:
+    spec = importlib.util.spec_from_file_location("run_project", Path(__file__).resolve().parents[2] / "run_project.py")
+    assert spec is not None and spec.loader is not None
+    run_project = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(run_project)
+
+    commands: list[list[str]] = []
+
+    monkeypatch.setattr(importlib.util, "find_spec", lambda name: None if name == "deep_translator" else object())
+    monkeypatch.setattr(
+        run_project.subprocess,
+        "check_call",
+        lambda command: commands.append(command) or 0,
+    )
+
+    run_project._ensure_translation_dependency()
+
+    assert commands == [[run_project.sys.executable, "-m", "pip", "install", "deep-translator>=1.11.4"]]
 
 
 

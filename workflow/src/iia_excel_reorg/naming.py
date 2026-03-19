@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
+import json
 import re
+from urllib.parse import quote
+from urllib.request import urlopen
 from functools import lru_cache
 from pathlib import Path
 
@@ -27,11 +30,7 @@ def sanitize_name(name: str) -> str:
     return result.strip("_")
 
 
-DEFAULT_PRODUCT_TRANSLATIONS = {
-    "azucar cana bruta": "raw cane sugar",
-    "arroz": "rice",
-    "te": "tea",
-}
+DEFAULT_PRODUCT_TRANSLATIONS: dict[str, str] = {}
 
 
 @lru_cache(maxsize=512)
@@ -39,16 +38,37 @@ def _auto_translate_product(raw_product: str) -> str:
     normalized_product = normalize_text(raw_product)
     if not normalized_product:
         return ""
+    translated = _translate_with_deep_translator(normalized_product)
+    if not translated:
+        translated = _translate_with_mymemory(normalized_product)
+    return normalize_text(translated) or normalized_product
+
+
+def _translate_with_deep_translator(normalized_product: str) -> str:
     if importlib.util.find_spec("deep_translator") is None:
-        return normalized_product
+        return ""
 
     translator_module = importlib.import_module("deep_translator")
     translator = translator_module.GoogleTranslator(source="auto", target="en")
     try:
-        translated = translator.translate(normalized_product)
+        return str(translator.translate(normalized_product) or "")
     except Exception:
-        return normalized_product
-    return normalize_text(translated) or normalized_product
+        return ""
+
+
+def _translate_with_mymemory(normalized_product: str) -> str:
+    url = (
+        "https://api.mymemory.translated.net/get"
+        f"?q={quote(normalized_product)}&langpair=auto|en"
+    )
+    try:
+        with urlopen(url, timeout=5) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except Exception:
+        return ""
+
+    translated = payload.get("responseData", {}).get("translatedText", "")
+    return str(translated or "")
 
 
 def strip_known_suffixes(raw_product: str) -> str:

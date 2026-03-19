@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import importlib.util
+import subprocess
 import sys
 from pathlib import Path
 
@@ -7,6 +9,16 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent
 SRC_ROOT = REPO_ROOT / "workflow" / "src"
 DEFAULT_CONFIG = REPO_ROOT / "workflow" / "config" / "example.units.yml"
+
+
+def _ensure_translation_dependency() -> None:
+    """Install the automatic translation dependency when running from source."""
+    if importlib.util.find_spec("deep_translator") is not None:
+        return
+
+    subprocess.check_call(
+        [sys.executable, "-m", "pip", "install", "deep-translator>=1.11.4"]
+    )
 
 
 def main() -> None:
@@ -17,6 +29,7 @@ def main() -> None:
     directly as a single script from the repository root.
     """
     sys.path.insert(0, str(SRC_ROOT))
+    _ensure_translation_dependency()
 
     from iia_excel_reorg.cli import main as cli_main
 
