@@ -2,16 +2,20 @@ from __future__ import annotations
 
 import argparse
 import re
+import shutil
+import sys
 from pathlib import Path
+from typing import Callable
 
 from .config import load_config
 from .naming import sanitize_name
-from .transformer import transform_workbook
+from .transformer import GeographyIndex, transform_workbook
 
 _EXTRACTED_PAGES_RE = re.compile(r"^extracted_pages_(?P<year>\d{4})_\d{2}$", re.IGNORECASE)
 _EXCEL_PATTERNS = ("*.xlsx", "*.xlsm")
 DEFAULT_INPUT_DIR = Path("data/raw inputs")
 DEFAULT_OUTPUT_DIR = Path("data/10-raw_imports")
+GEOGRAPHY_INDEX_FILENAME = "unique_geography_values.txt"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -110,7 +114,27 @@ def _ensure_workspace(input_path: Path, output_root: Path) -> None:
     """Create the default workflow folders when they do not exist yet."""
     if not input_path.exists() and input_path.suffix == "":
         input_path.mkdir(parents=True, exist_ok=True)
+    if output_root.exists():
+        shutil.rmtree(output_root)
     output_root.mkdir(parents=True, exist_ok=True)
+
+
+def _render_progress_bar(label: str, current: int, total: int, width: int = 24) -> str:
+    if total <= 0:
+        total = 1
+    completed = min(width, int(width * current / total))
+    bar = "#" * completed + "-" * (width - completed)
+    return f"{label}: [{bar}] {current}/{total}"
+
+
+def _run_progress(label: str, items: list[tuple[Path, Path]], action: Callable[[tuple[Path, Path]], None]) -> None:
+    total = len(items)
+    print(_render_progress_bar(label, 0, total))
+    for index, item in enumerate(items, start=1):
+        action(item)
+        sys.stdout.write("\r" + _render_progress_bar(label, index, total))
+        sys.stdout.flush()
+    print()
 
 
 def main() -> None:
@@ -135,13 +159,23 @@ def main() -> None:
         print(f"Created workspace folders if needed. Add source Excel files there and run again.")
         return
 
-    for workbook, output_subdir in workbook_entries:
+    geography_index = GeographyIndex()
+
+    def prepare_output(entry: tuple[Path, Path]) -> None:
+        _workbook, output_subdir = entry
         output_dir = output_root / output_subdir
         output_dir.mkdir(parents=True, exist_ok=True)
+
+    def transform_entry(entry: tuple[Path, Path]) -> None:
+        workbook, output_subdir = entry
+        output_dir = output_root / output_subdir
         output_name = f"{sanitize_name(config.canonical_name_for_document(workbook))}.xlsx"
         output_path = output_dir / output_name
-        transform_workbook(workbook, output_path, config=config)
-        print(f"Wrote {output_path}")
+        transform_workbook(workbook, output_path, config=config, geography_index=geography_index)
+
+    _run_progress("Reorganizing folders", workbook_entries, prepare_output)
+    _run_progress("Reorganizing excels", workbook_entries, transform_entry)
+    geography_index.write_txt(output_root / GEOGRAPHY_INDEX_FILENAME)
 
 
 if __name__ == "__main__":

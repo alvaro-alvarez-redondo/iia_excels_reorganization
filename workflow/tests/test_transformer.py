@@ -6,7 +6,7 @@ from pathlib import Path
 from iia_excel_reorg.cli import _compute_output_subdir, _ensure_workspace, _iter_workbooks_structured
 from iia_excel_reorg.config import load_config
 from iia_excel_reorg.naming import canonical_document_name, extract_source_product, infer_yearbook_metadata, sanitize_name
-from iia_excel_reorg.transformer import transform_workbook
+from iia_excel_reorg.transformer import GeographyIndex, transform_workbook
 from iia_excel_reorg.unit_rules import assign_unit
 from iia_excel_reorg.xlsx_io import SheetData, WorkbookData, read_workbook, write_workbook
 
@@ -54,6 +54,16 @@ def _build_source_workbook(path: Path, *, include_imports: bool = False) -> None
     write_workbook(path, WorkbookData(sheets=sheets))
 
 
+def _build_numeric_year_workbook(path: Path) -> None:
+    area = SheetData(name="AREA")
+    area.set_cell(1, 2, 1900.0)
+    area.set_cell(2, 1, "HÉMISPHÈRE SEPTENTRIONAL", fill_rgb=YELLOW)
+    area.set_cell(3, 1, "EUROPE.", fill_rgb=ORANGE)
+    area.set_cell(4, 1, "Austria (r)", fill_rgb=GREEN)
+    area.set_cell(4, 2, 12, fill_rgb=GREEN)
+    write_workbook(path, WorkbookData(sheets=[area]))
+
+
 
 def test_transform_workbook_assigns_units_from_rules_and_preserves_notes(tmp_path: Path) -> None:
     source_path = tmp_path / "r_fao_trade_1950_3_5_wheat.xlsx"
@@ -94,7 +104,11 @@ def test_transform_workbook_assigns_units_from_rules_and_preserves_notes(tmp_pat
     assert area.get_cell(2, 5).value == "reexports; special case"
     assert area.get_cell(2, 6).value == 17268
     assert area.get_cell(2, 7).value == 11887
-    assert area.get_cell(2, 1).fill_rgb == GREEN
+    assert area.get_cell(2, 1).fill_rgb is None
+    assert area.get_cell(2, 2).fill_rgb is None
+    assert area.get_cell(2, 3).fill_rgb == GREEN
+    assert area.get_cell(2, 4).fill_rgb is None
+    assert area.get_cell(2, 5).fill_rgb is None
     assert area.get_cell(2, 6).fill_rgb == YELLOW
     assert area.get_cell(2, 7).fill_rgb == ORANGE
 
@@ -105,6 +119,82 @@ def test_transform_workbook_assigns_units_from_rules_and_preserves_notes(tmp_pat
     assert production.get_cell(2, 4).value == "1000 q"
     assert production.get_cell(2, 6).value == 194876
     assert production.get_cell(2, 7).value == 315569
+
+
+def test_transform_workbook_preserves_group_colors_and_normalizes_numeric_year_headers(tmp_path: Path) -> None:
+    source_path = tmp_path / "r_fao_trade_1950_1_1_wheat.xlsx"
+    output_path = tmp_path / "standardized.xlsx"
+    _build_numeric_year_workbook(source_path)
+
+    config_path = tmp_path / "config.yml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "unit_mode: standard",
+                "document_categories:",
+                "  r_fao_trade_1950_1_1_wheat: 1",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    transform_workbook(source_path, output_path, config=load_config(config_path))
+
+    result = read_workbook(output_path)
+    area = result.sheets[0]
+    assert area.get_cell(1, 6).value == "1900"
+    assert area.get_cell(2, 1).fill_rgb == YELLOW
+    assert area.get_cell(2, 2).fill_rgb == ORANGE
+    assert area.get_cell(2, 3).fill_rgb == GREEN
+    assert area.get_cell(2, 4).fill_rgb is None
+    assert area.get_cell(2, 5).fill_rgb is None
+    assert area.get_cell(2, 5).value == "reexports"
+
+
+def test_transform_workbook_collects_unique_geography_labels(tmp_path: Path) -> None:
+    source_path = tmp_path / "r_fao_trade_1950_3_5_wheat.xlsx"
+    output_path = tmp_path / "standardized.xlsx"
+    _build_source_workbook(source_path, include_imports=True)
+    geography_index = GeographyIndex()
+
+    config_path = tmp_path / "config.yml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "unit_mode: standard",
+                "document_categories:",
+                "  r_fao_trade_1950_3_5_wheat: 1",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    transform_workbook(source_path, output_path, config=load_config(config_path), geography_index=geography_index)
+
+    assert geography_index.hemispheres == {"HÉMISPHÈRE SEPTENTRIONAL", "Hemisphère méridional"}
+    assert geography_index.continents == {"EUROPE", "Amérique"}
+    assert geography_index.countries == {"Austria", "Belgique-Luxembourg", "Canada", "Germany"}
+
+    index_path = tmp_path / "unique_geography_values.txt"
+    geography_index.write_txt(index_path)
+    assert index_path.read_text(encoding="utf-8") == "\n".join(
+        [
+            "[hemispheres]",
+            "Hemisphère méridional",
+            "HÉMISPHÈRE SEPTENTRIONAL",
+            "",
+            "[continents]",
+            "Amérique",
+            "EUROPE",
+            "",
+            "[countries]",
+            "Austria",
+            "Belgique-Luxembourg",
+            "Canada",
+            "Germany",
+            "",
+        ]
+    )
 
 
 
@@ -302,6 +392,20 @@ def test_ensure_workspace_creates_missing_input_and_output_dirs(tmp_path: Path) 
     assert output_dir.is_dir()
 
 
+def test_ensure_workspace_overwrites_existing_output_dir(tmp_path: Path) -> None:
+    input_dir = tmp_path / "data" / "raw inputs"
+    output_dir = tmp_path / "data" / "10-raw_imports"
+    output_dir.mkdir(parents=True)
+    stale_file = output_dir / "old.txt"
+    stale_file.write_text("stale", encoding="utf-8")
+
+    _ensure_workspace(input_dir, output_dir)
+
+    assert input_dir.is_dir()
+    assert output_dir.is_dir()
+    assert not stale_file.exists()
+
+
 def test_cli_main_creates_default_workspace_and_exits_cleanly_when_input_is_empty(tmp_path: Path, capsys) -> None:
     from iia_excel_reorg.cli import main
 
@@ -329,6 +433,40 @@ def test_cli_main_creates_default_workspace_and_exits_cleanly_when_input_is_empt
     assert "No Excel workbooks found in:" in captured.out
     assert (tmp_path / "data" / "raw inputs").is_dir()
     assert (tmp_path / "data" / "10-raw_imports").is_dir()
+
+
+def test_cli_main_reports_progress_bars(tmp_path: Path, capsys) -> None:
+    from iia_excel_reorg.cli import main
+
+    crops_dir = tmp_path / "inputs" / "reviewed_fao" / "extracted_pages_1929_30" / "crops"
+    crops_dir.mkdir(parents=True)
+    source = crops_dir / "reviewed_1_2_wheat.xlsx"
+    _build_source_workbook(source)
+
+    config_path = tmp_path / "config.yml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "unit_mode: standard",
+                "document_categories:",
+                "  reviewed_1_2_wheat: 1",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    import sys
+    orig_argv = sys.argv
+    try:
+        sys.argv = ["iia-excel-reorg", str(tmp_path / "inputs"), str(tmp_path / "outputs"), "--config", str(config_path)]
+        main()
+    finally:
+        sys.argv = orig_argv
+
+    captured = capsys.readouterr()
+    assert "Reorganizing folders:" in captured.out
+    assert "Reorganizing excels:" in captured.out
+    assert (tmp_path / "outputs" / "unique_geography_values.txt").is_file()
 
 
 
