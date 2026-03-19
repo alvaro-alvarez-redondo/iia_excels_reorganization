@@ -66,7 +66,7 @@ def _build_numeric_year_workbook(path: Path) -> None:
 
 
 def test_transform_workbook_assigns_units_from_rules_and_preserves_notes(tmp_path: Path) -> None:
-    source_path = tmp_path / "r_fao_trade_1950_3_5_wheat.xlsx"
+    source_path = tmp_path / "r_iia_trade_1950_3_5_wheat.xlsx"
     output_path = tmp_path / "standardized.xlsx"
     _build_source_workbook(source_path)
 
@@ -76,7 +76,7 @@ def test_transform_workbook_assigns_units_from_rules_and_preserves_notes(tmp_pat
             [
                 'unit_mode: standard',
                 'document_categories:',
-                '  r_fao_trade_1950_3_5_wheat: 1',
+                '  r_iia_trade_1950_3_5_wheat: 1',
             ]
         ),
         encoding="utf-8",
@@ -122,7 +122,7 @@ def test_transform_workbook_assigns_units_from_rules_and_preserves_notes(tmp_pat
 
 
 def test_transform_workbook_preserves_group_colors_and_normalizes_numeric_year_headers(tmp_path: Path) -> None:
-    source_path = tmp_path / "r_fao_trade_1950_1_1_wheat.xlsx"
+    source_path = tmp_path / "r_iia_trade_1950_1_1_wheat.xlsx"
     output_path = tmp_path / "standardized.xlsx"
     _build_numeric_year_workbook(source_path)
 
@@ -132,7 +132,7 @@ def test_transform_workbook_preserves_group_colors_and_normalizes_numeric_year_h
             [
                 "unit_mode: standard",
                 "document_categories:",
-                "  r_fao_trade_1950_1_1_wheat: 1",
+                "  r_iia_trade_1950_1_1_wheat: 1",
             ]
         ),
         encoding="utf-8",
@@ -152,7 +152,7 @@ def test_transform_workbook_preserves_group_colors_and_normalizes_numeric_year_h
 
 
 def test_transform_workbook_collects_unique_geography_labels(tmp_path: Path) -> None:
-    source_path = tmp_path / "r_fao_trade_1950_3_5_wheat.xlsx"
+    source_path = tmp_path / "r_iia_trade_1950_3_5_wheat.xlsx"
     output_path = tmp_path / "standardized.xlsx"
     _build_source_workbook(source_path, include_imports=True)
     geography_index = GeographyIndex()
@@ -163,7 +163,7 @@ def test_transform_workbook_collects_unique_geography_labels(tmp_path: Path) -> 
             [
                 "unit_mode: standard",
                 "document_categories:",
-                "  r_fao_trade_1950_3_5_wheat: 1",
+                "  r_iia_trade_1950_3_5_wheat: 1",
             ]
         ),
         encoding="utf-8",
@@ -199,7 +199,7 @@ def test_transform_workbook_collects_unique_geography_labels(tmp_path: Path) -> 
 
 
 def test_transform_workbook_supports_inputs_mode_and_harmonized_output_names(tmp_path: Path) -> None:
-    source_dir = tmp_path / "raw inputs" / "trade" / "extracted_pages_1938_39"
+    source_dir = tmp_path / "raw_inputs" / "trade" / "extracted_pages_1938_39"
     source_dir.mkdir(parents=True)
     source_path = source_dir / "reviewed_466_475arrozimp_exp.xlsx"
     output_dir = tmp_path / "out"
@@ -224,7 +224,7 @@ def test_transform_workbook_supports_inputs_mode_and_harmonized_output_names(tmp
     output_path = output_dir / f"{config.canonical_name_for_document(source_path)}.xlsx"
     transform_workbook(source_path, output_path, config=config)
 
-    assert output_path.name == "r_fao_trade_1938_466_475_rice.xlsx"
+    assert output_path.name == "r_iia_trade_1938_466_475_rice.xlsx"
     result = read_workbook(output_path)
     imports = result.sheets[2]
     assert imports.name == "imports"
@@ -237,10 +237,10 @@ def test_transform_workbook_supports_inputs_mode_and_harmonized_output_names(tmp
 
 
 def test_naming_and_unit_rules_cover_reviewed_documents() -> None:
-    path = Path("raw inputs/trade/extracted_pages_1938_39/reviewed_239_239azucar_caña_brutaprod.xlsx")
-    assert infer_yearbook_metadata(path) == {"agency": "fao", "yearbook": "trade", "year": "1938"}
+    path = Path("raw_inputs/trade/extracted_pages_1938_39/reviewed_239_239azucar_caña_brutaprod.xlsx")
+    assert infer_yearbook_metadata(path) == {"agency": "iia", "yearbook": "trade", "year": "1938"}
     assert extract_source_product(path) == "azucar cana bruta"
-    assert canonical_document_name(path) == "r_fao_trade_1938_239_239_raw_cane_sugar"
+    assert canonical_document_name(path) == "r_iia_trade_1938_239_239_raw_cane_sugar"
     assert assign_unit("imports", "te", 1) == "tonnes"
     assert assign_unit("imports", "te", 2) == "q"
     assert assign_unit("production", "vino", 1) == "1000 hl"
@@ -284,9 +284,9 @@ def test_load_config_parses_rule_based_yaml(tmp_path: Path) -> None:
 
 def test_compute_output_subdir_with_extracted_pages_and_subfolder() -> None:
     # Excel file nested under extracted_pages_YYYY_YY/subfolder/
-    path = Path("inputs/reviewed_fao/extracted_pages_1929_30/crops/reviewed_1_2_wheat.xlsx")
+    path = Path("inputs/reviewed_iia/extracted_pages_1929_30/crops/reviewed_1_2_wheat.xlsx")
     result = _compute_output_subdir(path)
-    assert result == Path("fao_extracted_pages_1929/fao_crops_1929")
+    assert result == Path("iia_extracted_pages_1929/iia_crops_1929")
 
 
 
@@ -295,7 +295,7 @@ def test_compute_output_subdir_with_extracted_pages_no_subfolder() -> None:
     # The parent folder (trade) is used as the output subfolder.
     path = Path("raw_inputs/trade/extracted_pages_1938_39/reviewed_466_475arroz.xlsx")
     result = _compute_output_subdir(path)
-    assert result == Path("fao_extracted_pages_1938/fao_trade_1938")
+    assert result == Path("iia_extracted_pages_1938/iia_trade_1938")
 
 
 
@@ -304,7 +304,7 @@ def test_compute_output_subdir_with_deep_nesting() -> None:
     # The sub_category folder (directly above extracted_pages_*) becomes the output subfolder.
     path = Path("raw_inputs/area and production/multiple product/extracted_pages_1933_34/wb.xlsx")
     result = _compute_output_subdir(path)
-    assert result == Path("fao_extracted_pages_1933/fao_multiple_product_1933")
+    assert result == Path("iia_extracted_pages_1933/iia_multiple_product_1933")
 
 
 
@@ -318,8 +318,8 @@ def test_compute_output_subdir_without_extracted_pages() -> None:
 
 def test_iter_workbooks_structured_builds_correct_hierarchy(tmp_path: Path) -> None:
     # Set up an input tree with two extracted_pages folders and a subfolder
-    crops_dir = tmp_path / "reviewed_fao" / "extracted_pages_1929_30" / "crops"
-    trade_dir = tmp_path / "reviewed_fao" / "extracted_pages_1938_39" / "trade"
+    crops_dir = tmp_path / "reviewed_iia" / "extracted_pages_1929_30" / "crops"
+    trade_dir = tmp_path / "reviewed_iia" / "extracted_pages_1938_39" / "trade"
     crops_dir.mkdir(parents=True)
     trade_dir.mkdir(parents=True)
 
@@ -333,16 +333,16 @@ def test_iter_workbooks_structured_builds_correct_hierarchy(tmp_path: Path) -> N
     entries = _iter_workbooks_structured(tmp_path)
 
     paths_and_subdirs = {e[0].name: e[1] for e in entries}
-    assert paths_and_subdirs["reviewed_1_2_wheat.xlsx"] == Path("fao_extracted_pages_1929/fao_crops_1929")
-    assert paths_and_subdirs["reviewed_3_4_rice.xlsx"] == Path("fao_extracted_pages_1938/fao_trade_1938")
+    assert paths_and_subdirs["reviewed_1_2_wheat.xlsx"] == Path("iia_extracted_pages_1929/iia_crops_1929")
+    assert paths_and_subdirs["reviewed_3_4_rice.xlsx"] == Path("iia_extracted_pages_1938/iia_trade_1938")
 
 
 
 def test_cli_main_creates_structured_output(tmp_path: Path) -> None:
-    """end-to-end: main() populates the fao_extracted_pages_*/fao_*_* hierarchy."""
+    """end-to-end: main() populates the iia_extracted_pages_*/iia_*_* hierarchy."""
     from iia_excel_reorg.cli import main
 
-    crops_dir = tmp_path / "inputs" / "reviewed_fao" / "extracted_pages_1929_30" / "crops"
+    crops_dir = tmp_path / "inputs" / "reviewed_iia" / "extracted_pages_1929_30" / "crops"
     crops_dir.mkdir(parents=True)
     source = crops_dir / "reviewed_1_2_wheat.xlsx"
     _build_source_workbook(source)
@@ -375,15 +375,15 @@ def test_cli_main_creates_structured_output(tmp_path: Path) -> None:
     finally:
         sys.argv = orig_argv
 
-    # The transformed file must land in fao_extracted_pages_1929/fao_crops_1929/
-    output_subdir = output_root / "fao_extracted_pages_1929" / "fao_crops_1929"
+    # The transformed file must land in iia_extracted_pages_1929/iia_crops_1929/
+    output_subdir = output_root / "iia_extracted_pages_1929" / "iia_crops_1929"
     assert output_subdir.is_dir(), f"Expected output subdir not found: {output_subdir}"
     xlsx_files = list(output_subdir.glob("*.xlsx"))
     assert len(xlsx_files) == 1
 
 
 def test_ensure_workspace_creates_missing_input_and_output_dirs(tmp_path: Path) -> None:
-    input_dir = tmp_path / "data" / "raw inputs"
+    input_dir = tmp_path / "data" / "raw_inputs"
     output_dir = tmp_path / "data" / "10-raw_imports"
 
     _ensure_workspace(input_dir, output_dir)
@@ -393,7 +393,7 @@ def test_ensure_workspace_creates_missing_input_and_output_dirs(tmp_path: Path) 
 
 
 def test_ensure_workspace_overwrites_existing_output_dir(tmp_path: Path) -> None:
-    input_dir = tmp_path / "data" / "raw inputs"
+    input_dir = tmp_path / "data" / "raw_inputs"
     output_dir = tmp_path / "data" / "10-raw_imports"
     output_dir.mkdir(parents=True)
     stale_file = output_dir / "old.txt"
@@ -418,7 +418,7 @@ def test_cli_main_creates_default_workspace_and_exits_cleanly_when_input_is_empt
     try:
         sys.argv = [
             "iia-excel-reorg",
-            str(tmp_path / "data" / "raw inputs"),
+            str(tmp_path / "data" / "raw_inputs"),
             str(tmp_path / "data" / "10-raw_imports"),
             "--config",
             str(config_path),
@@ -431,14 +431,14 @@ def test_cli_main_creates_default_workspace_and_exits_cleanly_when_input_is_empt
 
     captured = capsys.readouterr()
     assert "No Excel workbooks found in:" in captured.out
-    assert (tmp_path / "data" / "raw inputs").is_dir()
+    assert (tmp_path / "data" / "raw_inputs").is_dir()
     assert (tmp_path / "data" / "10-raw_imports").is_dir()
 
 
 def test_cli_main_reports_progress_bars(tmp_path: Path, capsys) -> None:
     from iia_excel_reorg.cli import main
 
-    crops_dir = tmp_path / "inputs" / "reviewed_fao" / "extracted_pages_1929_30" / "crops"
+    crops_dir = tmp_path / "inputs" / "reviewed_iia" / "extracted_pages_1929_30" / "crops"
     crops_dir.mkdir(parents=True)
     source = crops_dir / "reviewed_1_2_wheat.xlsx"
     _build_source_workbook(source)
@@ -504,13 +504,13 @@ def test_canonical_document_name_has_no_duplicate_underscores() -> None:
     name = canonical_document_name(path)
     assert " " not in name
     assert "__" not in name
-    assert name == "r_fao_my_trade_1938_1_2_wheat"
+    assert name == "r_iia_my_trade_1938_1_2_wheat"
 
 
 def test_compute_output_subdir_sanitizes_space_in_folder_name() -> None:
-    # Intermediate folder "my crops" has a space → must become "fao_my_crops_1929"
-    path = Path("inputs/reviewed_fao/extracted_pages_1929_30/my crops/reviewed_1_2.xlsx")
+    # Intermediate folder "my crops" has a space → must become "iia_my_crops_1929"
+    path = Path("inputs/reviewed_iia/extracted_pages_1929_30/my crops/reviewed_1_2.xlsx")
     result = _compute_output_subdir(path)
     assert " " not in str(result)
     assert "__" not in str(result)
-    assert result == Path("fao_extracted_pages_1929/fao_my_crops_1929")
+    assert result == Path("iia_extracted_pages_1929/iia_my_crops_1929")

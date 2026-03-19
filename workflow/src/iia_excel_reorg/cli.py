@@ -13,7 +13,7 @@ from .transformer import GeographyIndex, transform_workbook
 
 _EXTRACTED_PAGES_RE = re.compile(r"^extracted_pages_(?P<year>\d{4})_\d{2}$", re.IGNORECASE)
 _EXCEL_PATTERNS = ("*.xlsx", "*.xlsm")
-DEFAULT_INPUT_DIR = Path("data/raw inputs")
+DEFAULT_INPUT_DIR = Path("data/raw_inputs")
 DEFAULT_OUTPUT_DIR = Path("data/10-raw_imports")
 GEOGRAPHY_INDEX_FILENAME = "unique_geography_values.txt"
 
@@ -25,10 +25,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "input",
         nargs="?",
-        default="data/raw inputs",
+        default="data/raw_inputs",
         help="Excel workbook file or directory containing workbook files. "
-             "Defaults to the 'data/raw inputs/' folder in the current directory. "
-             "Quote the path when it contains spaces: \"data/raw inputs\".",
+             "Defaults to the 'data/raw_inputs/' folder in the current directory. "
+             "Quote the path when it contains spaces: \"data/raw_inputs\".",
     )
     parser.add_argument(
         "output_dir",
@@ -50,17 +50,17 @@ def _compute_output_subdir(workbook_path: Path) -> Path:
     When the path contains a directory matching ``extracted_pages_YYYY_YY`` the
     output hierarchy is built as::
 
-        fao_extracted_pages_YYYY/
-        └── fao_{subfolder}_YYYY/
+        iia_extracted_pages_YYYY/
+        └── iia_{subfolder}_YYYY/
 
     The subfolder is determined in this order:
 
     1. If a directory sits **between** ``extracted_pages_*`` and the workbook
        file, its name is used (e.g. ``extracted_pages_*/crops/file.xlsx``
-       → ``fao_crops_YYYY``).
+       → ``iia_crops_YYYY``).
     2. Otherwise the directory that sits **directly above**
        ``extracted_pages_*`` is used (e.g. ``trade/extracted_pages_*/file.xlsx``
-       → ``fao_trade_YYYY``).  This handles the common structure where the
+       → ``iia_trade_YYYY``).  This handles the common structure where the
        yearbook topic folder wraps the year directory.
 
     If no ``extracted_pages_*`` segment is found the file is placed directly in
@@ -71,16 +71,16 @@ def _compute_output_subdir(workbook_path: Path) -> Path:
         match = _EXTRACTED_PAGES_RE.match(part)
         if match:
             year = match.group("year")
-            parent_dir = f"fao_extracted_pages_{year}"
+            parent_dir = f"iia_extracted_pages_{year}"
             # Priority 1: a subfolder between extracted_pages_* and the file
             intermediate = parts[idx + 1 : -1]
             if intermediate:
-                child_dir = sanitize_name(f"fao_{intermediate[0]}_{year}")
+                child_dir = sanitize_name(f"iia_{intermediate[0]}_{year}")
                 return Path(parent_dir) / child_dir
             # Priority 2: the folder directly above extracted_pages_*
             if idx > 0:
                 topic = parts[idx - 1]
-                child_dir = sanitize_name(f"fao_{topic}_{year}")
+                child_dir = sanitize_name(f"iia_{topic}_{year}")
                 return Path(parent_dir) / child_dir
             return Path(parent_dir)
     return Path(".")
@@ -175,7 +175,7 @@ def main() -> None:
 
     _run_progress("Reorganizing folders", workbook_entries, prepare_output)
     _run_progress("Reorganizing excels", workbook_entries, transform_entry)
-    geography_index.write_txt(output_root / GEOGRAPHY_INDEX_FILENAME)
+    geography_index.write_txt(Path.cwd() / GEOGRAPHY_INDEX_FILENAME)
 
 
 if __name__ == "__main__":
