@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import importlib
+import importlib.util
 import re
+from functools import lru_cache
 from pathlib import Path
 
 from .unit_rules import normalize_text
@@ -30,6 +33,22 @@ DEFAULT_PRODUCT_TRANSLATIONS = {
     "te": "tea",
 }
 
+
+@lru_cache(maxsize=512)
+def _auto_translate_product(raw_product: str) -> str:
+    normalized_product = normalize_text(raw_product)
+    if not normalized_product:
+        return ""
+    if importlib.util.find_spec("deep_translator") is None:
+        return normalized_product
+
+    translator_module = importlib.import_module("deep_translator")
+    translator = translator_module.GoogleTranslator(source="auto", target="en")
+    try:
+        translated = translator.translate(normalized_product)
+    except Exception:
+        return normalized_product
+    return normalize_text(translated) or normalized_product
 
 
 def strip_known_suffixes(raw_product: str) -> str:
@@ -87,7 +106,7 @@ def canonical_document_name(document_path: str | Path, product_translations: dic
         **DEFAULT_PRODUCT_TRANSLATIONS,
         **{normalize_text(key): normalize_text(value) for key, value in (product_translations or {}).items()},
     }
-    english_product = translations.get(source_product, source_product)
+    english_product = translations.get(source_product, _auto_translate_product(source_product))
     product_slug = english_product.replace(" ", "_")
     raw = f"r_iia_{metadata['yearbook']}_{metadata['year']}_{match.group('start')}_{match.group('end')}_{product_slug}"
     return sanitize_name(raw)

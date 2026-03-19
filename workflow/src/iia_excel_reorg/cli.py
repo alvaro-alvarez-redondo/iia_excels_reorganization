@@ -129,7 +129,8 @@ def _render_progress_bar(label: str, current: int, total: int, width: int = 24) 
 
 def _run_progress(label: str, items: list[tuple[Path, Path]], action: Callable[[tuple[Path, Path]], None]) -> None:
     total = len(items)
-    print(_render_progress_bar(label, 0, total))
+    sys.stdout.write(_render_progress_bar(label, 0, total))
+    sys.stdout.flush()
     for index, item in enumerate(items, start=1):
         action(item)
         sys.stdout.write("\r" + _render_progress_bar(label, index, total))
@@ -175,7 +176,7 @@ def main() -> None:
 
     _run_progress("Reorganizing folders", workbook_entries, prepare_output)
     _run_progress("Reorganizing excels", workbook_entries, transform_entry)
-    geography_index.write_txt(Path.cwd() / GEOGRAPHY_INDEX_FILENAME)
+    geography_index.write_txt(output_root / GEOGRAPHY_INDEX_FILENAME)
 
 
 if __name__ == "__main__":

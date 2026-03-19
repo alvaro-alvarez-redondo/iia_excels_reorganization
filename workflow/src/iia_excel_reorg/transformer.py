@@ -12,18 +12,111 @@ from .xlsx_io import SheetData, WorkbookData, read_workbook, write_workbook
 HEADER_FILL = "FF3CCB5A"
 HEADER_COLUMNS = ["hemisphere", "continent", "country", "unit", "footnotes"]
 PAREN_RE = re.compile(r"\(([^()]*)\)")
-HEMISPHERE_RE = re.compile(r"h[eé]misph[eè]re|hemisphere", re.IGNORECASE)
-KNOWN_CONTINENTS = {
-    "EUROPE",
-    "AMERIQUE",
-    "AMERICA",
-    "ASIE",
-    "ASIA",
+HEMISPHERE_RE = re.compile(r"h[eéê]misph[eèê]?re|hemisphere", re.IGNORECASE)
+
+
+def _normalize_known_geography_label(value: str) -> str:
+    normalized = unicodedata.normalize("NFKD", value)
+    ascii_only = normalized.encode("ascii", "ignore").decode("ascii")
+    return ascii_only.casefold().strip().rstrip(".:")
+
+
+RAW_CONTINENT_LABELS = (
     "AFRIQUE",
-    "AFRICA",
+    "AMÉR DU NORD ET AMÉR CENTRALE",
+    "AMER. DU NORD ET AMER. CENTR.",
+    "AMERIQUE",
+    "AMERIQUÉ",
+    "AMÉRIQUE",
+    "AMÉRIQUE CENTRALE ET MEXIQUE.",
+    "AMERIQUE CENTRALE.",
+    "AMÉRIQUE CENTRALE.",
+    "AMERIQUE DU NORD",
+    "AMÉRIQUE DU NORD",
+    "AMÉRIQUE DU NORD ET AMÉR CENTR",
+    "AMERIQUE DU NORD ET AMERIQUE CENTRALE",
+    "AMERIQUE DU NORD ET AMÉRIQUE CENTRALE",
+    "AMÉRIQUE DU NORD ET AMERIQUE CENTRALE",
+    "AMÉRIQUE DU NORD ET AMÉRIQUE CENTRALE",
+    "AMERIQUE DU NORD ET AMERIQUE CENTRALE.",
+    "AMERIQUE DU NORD ET AMÉRIQUE CENTRALE.",
+    "AMÉRIQUE DU NORD ET AMERIQUE CENTRALE.",
+    "AMÉRIQUE DU NORD ET AMÉRIQUE CENTRALE.",
+    "AMÉRIQUE DU NORD ET CENTRALE.",
+    "AMERIQUE DU NORD.",
+    "AMÉRIQUE DU NORD.",
+    "AMERIQUE DU SUD",
+    "AMÉRIQUE DU SUD",
+    "AMERIQUE DU SUD.",
+    "AMÉRIQUE DU SUD.",
+    "AMERIQUE MERIDIONALE",
+    "AMERIQUE MÉRIDIONALE",
+    "AMÉRIQUE MERIDIONALE",
+    "Amérique méridionale",
+    "AMERIQUE MERIDIONALE.",
+    "AMERIQUE MÉRIDIONALE.",
+    "AMÉRIQUE MERIDIONALE.",
+    "AMÉRIQUE MÉRIDIONALE.",
+    "AMERIQUE MÉRILIONALE",
+    "AMÉRIQUE SEPIENTRIONALE ET CENTRALE",
+    "AMERIQUE SEPT ET CENTRALE",
+    "AMÉRIQUE SEPT. ET CENTR.",
+    "AMÉRIQUE SEPT. ET CENTRALE",
+    "AMÉRIQUE SEPT. ET CENTRALE.",
+    "AMERIQUE SEPTENT ET CENTRALE",
+    "AMÉRIQUE SEPTENT. ET CENTRALE",
+    "AMERIQUE SEPTENTR ET CENTR",
+    "AMÉRIQUE SEPTENTR. ET CENTP.",
+    "AMÉRIQUE SEPTENTR. ET CENTR.",
+    "AMERIQUE SEPTENTR. ET CENTRALE",
+    "AMÉRIQUE SEPTENTR. ET CENTRALE",
+    "AMÉRIQUE SEPTENTRION ET CENTRALE",
+    "AMERIQUE SEPTENTRIONA LE ET CENTRALE",
+    "AMÉRIQUE SEPTENTRIONALD ET CENTRALE.",
+    "AMERIQUE SEPTENTRIONALE",
+    "AMÉRIQUE SEPTENTRIONALE",
+    "AMERIQUE SEPTENTRIONALE ET CENTR",
+    "AMÉRIQUE SEPTENTRIONALE ET CENTR",
+    "AMERIQUE SEPTENTRIONALE ET CENTRALE",
+    "Amérique septentrionale et centrale",
+    "AMERIQUE SEPTENTRIONALE ET CENTRALE.",
+    "AMÉRIQUE SEPTENTRIONALE ET CENTRALE.",
+    "AMÉRIQUE SEPTENTRIONALE.",
+    "AMÉRIQUEMÉRIDIONALE",
+    "ASIE",
+    "AUSTRALIE",
+    "EUROPE",
     "OCEANIE",
-    "OCEANIA",
-}
+    "OCÉANIE",
+    "OCEANIR.",
+    "OCÉANTE",
+    "OCEANTE.",
+    "OCRANIE",
+    "OCRANIE.",
+)
+KNOWN_CONTINENTS = {_normalize_known_geography_label(label) for label in RAW_CONTINENT_LABELS}
+
+RAW_HEMISPHERE_LABELS = (
+    "HÉMISHPÈRE SEPTENTRIONAL",
+    "HÉMISPHERE MÉRIDIONAL",
+    "HÉMISPHÈRE MERIDIONAL",
+    "HÉMISPHÈRE MÉRIDIONAL",
+    "HÉMISPHÊRE MÉRIDIONAL",
+    "HEMISPHERE NORD",
+    "HEMISPHÈRE NORD",
+    "HÉMISPHÈRE NORD",
+    "HEMISPHERE SEPTENTRIONAL",
+    "HÉMISPHERE SEPTENTRIONAL",
+    "HÉMISPHÈRE SEPTENTRIONAL",
+    "HÊMISPHÊRE SEPTENTRIONAL",
+    "HEMISPHERE SUD",
+    "HEMISPHÈRE SUD",
+    "HÉMISPHERE SUD",
+    "HÉMISPHÈRE SUD",
+    "HÉMISPHÈRE SUDAFRIQUE.",
+)
+KNOWN_HEMISPHERES = {_normalize_known_geography_label(label) for label in RAW_HEMISPHERE_LABELS}
+
 
 
 class TransformationError(RuntimeError):
@@ -201,14 +294,13 @@ def _strip_terminal_punctuation(value: str) -> str:
 
 
 def _normalize_label(value: str) -> str:
-    normalized = unicodedata.normalize("NFKD", value)
-    ascii_only = normalized.encode("ascii", "ignore").decode("ascii")
-    return ascii_only.upper()
+    return _normalize_known_geography_label(value)
 
 
 
 def _is_hemisphere_row(label: str) -> bool:
-    return bool(HEMISPHERE_RE.search(label))
+    normalized = _normalize_label(_strip_terminal_punctuation(label))
+    return normalized in KNOWN_HEMISPHERES or bool(HEMISPHERE_RE.search(label))
 
 
 
