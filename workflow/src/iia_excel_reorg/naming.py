@@ -90,7 +90,10 @@ def extract_source_product(document_path: str | Path) -> str:
 
 
 
-def canonical_document_name(document_path: str | Path, product_translations: dict[str, str] | None = None) -> str:
+def canonical_document_name(
+    document_path: str | Path,
+    product_translations: dict[str, str] | None = None,
+) -> str:
     path = Path(document_path)
     stem = path.stem
     if stem.startswith("r_") and not stem.startswith(REVIEWED_PREFIX):
