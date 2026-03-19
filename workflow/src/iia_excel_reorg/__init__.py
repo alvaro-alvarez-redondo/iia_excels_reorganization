@@ -1,9 +1,9 @@
 """Utilities for reorganizing historical Excel workbooks."""
 
 from .config import WorkbookConfig, load_config
-from .naming import canonical_document_name, extract_source_product, infer_yearbook_metadata, sanitize_name
-from .transformer import transform_workbook
-from .unit_rules import assign_unit
+from .utils.naming import canonical_document_name, extract_source_product, infer_yearbook_metadata, sanitize_name
+from .core.transformer import transform_workbook
+from .services.units import assign_unit
 
 __all__ = [
     "WorkbookConfig",

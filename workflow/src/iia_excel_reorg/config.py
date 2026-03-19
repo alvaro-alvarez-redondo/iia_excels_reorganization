@@ -3,8 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .naming import canonical_document_name, extract_source_product
-from .unit_rules import normalize_text
+from .utils.naming import canonical_document_name, extract_source_product
+from .utils.text import normalize_text
 
 
 @dataclass(slots=True)
@@ -19,15 +19,21 @@ class WorkbookConfig:
     unit_overrides: dict[str, str] = field(default_factory=dict)
 
     def should_include_sheet(self, sheet_name: str) -> bool:
+        """Return ``True`` when *sheet_name* passes the inclusion filter.
+
+        All sheets are accepted when :attr:`include_sheets` is ``None``.
+        """
         if self.include_sheets is None:
             return True
         allowed = {name.upper() for name in self.include_sheets}
         return sheet_name.upper() in allowed
 
     def canonical_name_for_document(self, document_name: str | Path) -> str:
+        """Return the canonical output filename stem for *document_name*."""
         return canonical_document_name(document_name, self.product_translations, self.product_aliases)
 
     def category_for_document(self, document_name: str | Path) -> int | None:
+        """Look up the numeric size category for *document_name*, or ``None`` if unconfigured."""
         stem = Path(document_name).stem
         canonical = self.canonical_name_for_document(document_name)
         raw_value = self.document_categories.get(stem)
@@ -36,10 +42,12 @@ class WorkbookConfig:
         return int(raw_value) if raw_value is not None else None
 
     def product_for_document(self, document_name: str | Path) -> str:
+        """Return the normalized product name for *document_name*, respecting any alias."""
         derived = extract_source_product(document_name)
         return self.product_aliases.get(derived, derived)
 
     def override_for(self, document_name: str | Path, sheet_name: str) -> str:
+        """Return any explicit unit override for *document_name* / *sheet_name*, or ``""``."""
         stem = Path(document_name).stem
         canonical = self.canonical_name_for_document(document_name)
         specific_keys = (f"{stem}:{sheet_name.lower()}", f"{canonical}:{sheet_name.lower()}")
@@ -49,8 +57,12 @@ class WorkbookConfig:
         return self.unit_overrides.get(sheet_name.lower(), "")
 
 
-
 def _coerce_scalar(value: str) -> str | int:
+    """Coerce a raw YAML scalar string to an ``int`` when it looks like one.
+
+    Quoted strings (single or double) have their quotes stripped.
+    All other values are returned as-is.
+    """
     value = value.strip()
     if value.isdigit() or (value.startswith("-") and value[1:].isdigit()):
         return int(value)
@@ -59,8 +71,15 @@ def _coerce_scalar(value: str) -> str | int:
     return value
 
 
-
 def _parse_simple_yaml(text: str) -> dict[str, object]:
+    """Parse a minimal subset of YAML sufficient for the project's configuration files.
+
+    Supports:
+    - Top-level ``key: value`` scalars (strings and integers).
+    - Top-level section headers (``key:`` with no value) that contain either
+      ``key: value`` mappings or ``- item`` lists.
+    - ``#`` comment lines and blank lines (skipped).
+    """
     result: dict[str, object] = {}
     current_section: str | None = None
 
@@ -109,8 +128,11 @@ def _parse_simple_yaml(text: str) -> dict[str, object]:
     return result
 
 
-
 def _normalize_alias_map(raw_mapping: dict[str, object] | None) -> dict[str, str]:
+    """Normalise both keys and values of *raw_mapping* using :func:`~utils.text.normalize_text`.
+
+    Returns an empty dict when *raw_mapping* is ``None`` or empty.
+    """
     mapping = raw_mapping or {}
     return {
         normalize_text(str(key)): normalize_text(str(value))
@@ -118,8 +140,13 @@ def _normalize_alias_map(raw_mapping: dict[str, object] | None) -> dict[str, str
     }
 
 
-
 def load_config(config_path: str | Path | None) -> WorkbookConfig:
+    """Read and validate a YAML configuration file and return a :class:`WorkbookConfig`.
+
+    Returns a default (unconfigured) :class:`WorkbookConfig` when *config_path*
+    is ``None``.  Raises :exc:`FileNotFoundError` if the file does not exist and
+    :exc:`ValueError` for malformed sections.
+    """
     if config_path is None:
         return WorkbookConfig()
 

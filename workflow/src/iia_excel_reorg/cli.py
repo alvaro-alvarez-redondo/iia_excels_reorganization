@@ -8,9 +8,9 @@ from pathlib import Path
 from typing import Callable
 
 from .config import load_config
-from .naming import sanitize_name
-from .transformer import GeographyIndex, ProductIndex, transform_workbook
-from .unit_rules import derive_product_from_document
+from .utils.naming import sanitize_name
+from .core.transformer import GeographyIndex, ProductIndex, transform_workbook
+from .utils.text import derive_product_from_document
 
 _EXTRACTED_PAGES_RE = re.compile(r"^extracted_pages_(?P<year>\d{4})_\d{2}$", re.IGNORECASE)
 _EXCEL_PATTERNS = ("*.xlsx", "*.xlsm")
@@ -23,6 +23,7 @@ LISTS_DIR = PROJECT_ROOT / "data" / "lists"
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Build and return the CLI argument parser."""
     parser = argparse.ArgumentParser(
         description="Reorganize historical Excel workbooks into a standardized structure.",
     )
@@ -125,6 +126,7 @@ def _ensure_workspace(input_path: Path, output_root: Path) -> None:
 
 
 def _render_progress_bar(label: str, current: int, total: int, width: int = 24) -> str:
+    """Return a single-line progress bar string suitable for ``sys.stdout.write``."""
     if total <= 0:
         total = 1
     completed = min(width, int(width * current / total))
@@ -134,6 +136,7 @@ def _render_progress_bar(label: str, current: int, total: int, width: int = 24) 
 
 
 def _run_progress(label: str, items: list[tuple[Path, Path]], action: Callable[[tuple[Path, Path]], None]) -> None:
+    """Run *action* on each item in *items* while printing an updating progress bar."""
     total = len(items)
     sys.stdout.write(_render_progress_bar(label, 0, total))
     sys.stdout.flush()
@@ -145,6 +148,7 @@ def _run_progress(label: str, items: list[tuple[Path, Path]], action: Callable[[
 
 
 def main() -> None:
+    """Entry point for the ``iia-excel-reorg`` command-line tool."""
     parser = build_parser()
     args = parser.parse_args()
 
@@ -170,11 +174,13 @@ def main() -> None:
     product_index = ProductIndex()
 
     def prepare_output(entry: tuple[Path, Path]) -> None:
+        """Create the output subdirectory for *entry* if it does not yet exist."""
         _workbook, output_subdir = entry
         output_dir = output_root / output_subdir
         output_dir.mkdir(parents=True, exist_ok=True)
 
     def transform_entry(entry: tuple[Path, Path]) -> None:
+        """Transform a single workbook and write the result to the output directory."""
         workbook, output_subdir = entry
         output_dir = output_root / output_subdir
         output_name = f"{sanitize_name(config.canonical_name_for_document(workbook))}.xlsx"
