@@ -56,6 +56,11 @@ def _auto_translate_product(raw_product: str) -> str:
 
 
 def _translate_with_deep_translator(normalized_product: str) -> str:
+    """Attempt to translate *normalized_product* via the ``deep_translator`` package.
+
+    Returns an empty string when the package is not installed or the translation
+    fails for any reason.
+    """
     if importlib.util.find_spec("deep_translator") is None:
         return ""
 
@@ -68,6 +73,10 @@ def _translate_with_deep_translator(normalized_product: str) -> str:
 
 
 def _translate_with_mymemory(normalized_product: str) -> str:
+    """Attempt to translate *normalized_product* via the MyMemory public API.
+
+    Returns an empty string on any network or parsing failure.
+    """
     url = (
         "https://api.mymemory.translated.net/get"
         f"?q={quote(normalized_product)}&langpair=auto|en"

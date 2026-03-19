@@ -14,7 +14,7 @@ _COMBINING_RE = re.compile(
     r"\ufe20-\ufe2f]+"  # Combining Half Marks
 )
 
-SPECIAL_TONNES_OR_Q_PRODUCTS = frozenset({
+SPECIAL_TONNES_OR_Q_PRODUCTS = frozenset((
     "te",
     "pimienta",
     "tabaco",
@@ -34,15 +34,15 @@ SPECIAL_TONNES_OR_Q_PRODUCTS = frozenset({
     "huevos",
     "derivados huevos",
     "seda",
-})
-INPUT_VARIABLES = frozenset({
+))
+INPUT_VARIABLES = frozenset((
     "production",
     "imports",
     "exports",
     "production (k20)",
     "consumption",
     "stocks",
-})
+))
 
 # Unit lookup tables keyed by (variable, product) for production-specific rules.
 # Each entry maps category 1 → unit and category ≠ 1 → unit.

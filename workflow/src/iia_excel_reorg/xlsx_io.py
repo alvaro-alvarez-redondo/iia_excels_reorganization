@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from functools import reduce
+from itertools import groupby
 from pathlib import Path
 from xml.etree import ElementTree as ET
 from zipfile import ZIP_DEFLATED, ZipFile
@@ -119,6 +120,7 @@ def write_workbook(path: str | Path, workbook: WorkbookData) -> Path:
 
 
 def _resolve_sheet_targets(workbook_root: ET.Element, rels_root: ET.Element) -> list[tuple[str, str]]:
+    """Return ``[(sheet_name, target_path), …]`` from the workbook and its relationship file."""
     rels = {
         rel.attrib["Id"]: rel.attrib["Target"]
         for rel in rels_root.findall(f"{{{PKG_REL_NS}}}Relationship")
@@ -131,6 +133,7 @@ def _resolve_sheet_targets(workbook_root: ET.Element, rels_root: ET.Element) -> 
 
 
 def _read_shared_strings(archive: ZipFile) -> list[str]:
+    """Extract the shared-strings table from *archive*, or return an empty list."""
     if "xl/sharedStrings.xml" not in archive.namelist():
         return []
     root = ET.fromstring(archive.read("xl/sharedStrings.xml"))
@@ -142,6 +145,10 @@ def _read_shared_strings(archive: ZipFile) -> list[str]:
 
 
 def _read_fill_map(archive: ZipFile) -> dict[int, str | None]:
+    """Build a mapping from cell-style index to fill RGB colour string from *archive*.
+
+    Returns an empty dict when the workbook has no ``xl/styles.xml`` entry.
+    """
     if "xl/styles.xml" not in archive.namelist():
         return {}
     root = ET.fromstring(archive.read("xl/styles.xml"))
@@ -157,6 +164,7 @@ def _read_fill_map(archive: ZipFile) -> dict[int, str | None]:
 
 
 def _read_cell_value(cell: ET.Element, shared_strings: list[str]) -> str | int | float | None:
+    """Parse the value of a ``<c>`` element, resolving shared-string indices and numeric types."""
     cell_type = cell.attrib.get("t")
     if cell_type == "inlineStr":
         text = cell.find(f".//{{{MAIN_NS}}}t")
@@ -197,6 +205,7 @@ def _column_index_from_letters(letters: str) -> int:
 
 
 def _column_letters(index: int) -> str:
+    """Convert a 1-based column index to its OOXML letter string (e.g. ``1`` → ``"A"``, ``28`` → ``"AB"``)."""
     letters = ""
     while index > 0:
         index, remainder = divmod(index - 1, 26)
@@ -205,6 +214,7 @@ def _column_letters(index: int) -> str:
 
 
 def _collect_fill_styles(workbook: WorkbookData) -> dict[str, int]:
+    """Return a mapping of RGB colour → fill-style index for every unique fill in *workbook*."""
     fills: dict[str, int] = {}
     next_fill_id = 2
     for sheet in workbook.sheets:
@@ -216,6 +226,7 @@ def _collect_fill_styles(workbook: WorkbookData) -> dict[str, int]:
 
 
 def _render_content_types(workbook: WorkbookData) -> bytes:
+    """Render the ``[Content_Types].xml`` OOXML part as UTF-8 bytes."""
     root = ET.Element(f"{{{CONTENT_NS}}}Types")
     ET.SubElement(root, f"{{{CONTENT_NS}}}Default", Extension="rels", ContentType="application/vnd.openxmlformats-package.relationships+xml")
     ET.SubElement(root, f"{{{CONTENT_NS}}}Default", Extension="xml", ContentType="application/xml")
@@ -227,12 +238,14 @@ def _render_content_types(workbook: WorkbookData) -> bytes:
 
 
 def _render_root_relationships() -> bytes:
+    """Render the ``_rels/.rels`` OOXML part pointing to ``xl/workbook.xml``."""
     root = ET.Element(f"{{{PKG_REL_NS}}}Relationships")
     ET.SubElement(root, f"{{{PKG_REL_NS}}}Relationship", Id="rId1", Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument", Target="xl/workbook.xml")
     return ET.tostring(root, encoding="utf-8", xml_declaration=True)
 
 
 def _render_workbook(workbook: WorkbookData) -> bytes:
+    """Render the ``xl/workbook.xml`` OOXML part listing all sheets."""
     root = ET.Element(f"{{{MAIN_NS}}}workbook")
     sheets_el = ET.SubElement(root, f"{{{MAIN_NS}}}sheets")
     for idx, sheet in enumerate(workbook.sheets, start=1):
@@ -242,6 +255,7 @@ def _render_workbook(workbook: WorkbookData) -> bytes:
 
 
 def _render_workbook_relationships(workbook: WorkbookData) -> bytes:
+    """Render the ``xl/_rels/workbook.xml.rels`` relationship part for all sheets and styles."""
     root = ET.Element(f"{{{PKG_REL_NS}}}Relationships")
     for idx, _sheet in enumerate(workbook.sheets, start=1):
         ET.SubElement(root, f"{{{PKG_REL_NS}}}Relationship", Id=f"rId{idx}", Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet", Target=f"worksheets/sheet{idx}.xml")
@@ -250,6 +264,7 @@ def _render_workbook_relationships(workbook: WorkbookData) -> bytes:
 
 
 def _render_styles(fill_styles: dict[str, int]) -> bytes:
+    """Render the ``xl/styles.xml`` OOXML part encoding each unique fill colour as a cell style."""
     root = ET.Element(f"{{{MAIN_NS}}}styleSheet")
     ET.SubElement(root, f"{{{MAIN_NS}}}numFmts", count="0")
     fonts = ET.SubElement(root, f"{{{MAIN_NS}}}fonts", count="1")
@@ -282,18 +297,23 @@ def _render_styles(fill_styles: dict[str, int]) -> bytes:
 
 
 def _render_sheet(sheet: SheetData, fill_styles: dict[str, int]) -> bytes:
+    """Render a worksheet as an OOXML ``xl/worksheets/sheetN.xml`` part.
+
+    Cells are emitted in row-major order.  Uses :func:`itertools.groupby` on
+    the pre-sorted cell list to avoid building an intermediate ``rows`` dict
+    and eliminate the per-row inner sort.
+    """
     root = ET.Element(f"{{{MAIN_NS}}}worksheet")
     if sheet.max_row and sheet.max_column:
         ET.SubElement(root, f"{{{MAIN_NS}}}dimension", ref=f"A1:{_column_letters(sheet.max_column)}{sheet.max_row}")
     sheet_data = ET.SubElement(root, f"{{{MAIN_NS}}}sheetData")
 
-    rows: dict[int, list[tuple[int, CellData]]] = {}
-    for (row_idx, col_idx), cell in sorted(sheet.cells.items()):
-        rows.setdefault(row_idx, []).append((col_idx, cell))
-
-    for row_idx in sorted(rows):
+    # Sort once by (row, col); groupby then yields each row's cells already
+    # in ascending column order — no secondary sort is needed.
+    sorted_cells = sorted(sheet.cells.items())
+    for row_idx, row_iter in groupby(sorted_cells, key=lambda item: item[0][0]):
         row_el = ET.SubElement(sheet_data, f"{{{MAIN_NS}}}row", r=str(row_idx))
-        for col_idx, cell in sorted(rows[row_idx], key=lambda item: item[0]):
+        for (_, col_idx), cell in row_iter:
             if cell.value is None:
                 continue
             attrs = {"r": f"{_column_letters(col_idx)}{row_idx}"}

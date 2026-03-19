@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import itertools
 import re
 import unicodedata
 from dataclasses import dataclass, field
@@ -132,14 +133,17 @@ class GeographyIndex:
     hemispheres: set[str] = field(default_factory=set)
 
     def add_country(self, value: str) -> None:
+        """Add *value* to the countries set when non-empty."""
         if value:
             self.countries.add(value)
 
     def add_continent(self, value: str) -> None:
+        """Add *value* to the continents set when non-empty."""
         if value:
             self.continents.add(value)
 
     def add_hemisphere(self, value: str) -> None:
+        """Add *value* to the hemispheres set when non-empty."""
         if value:
             self.hemispheres.add(value)
 
@@ -168,6 +172,7 @@ class ProductIndex:
     products: set[str] = field(default_factory=set)
 
     def add_product(self, value: str) -> None:
+        """Add *value* to the products set when non-empty."""
         if value:
             self.products.add(value)
 
@@ -241,14 +246,11 @@ def transform_workbook(
 
 def _extract_year_headers(sheet: SheetData) -> list[tuple[int, str]]:
     """Return ``[(column_index, label), …]`` for all non-empty header cells in row 1 from column 2 onward."""
-    headers: list[tuple[int, str]] = []
-    for column in range(2, sheet.max_column + 1):
-        value = sheet.get_cell(1, column).value
-        header = _stringify_header(value)
-        if header == "":
-            continue
-        headers.append((column, header))
-    return headers
+    return [
+        (column, header)
+        for column in range(2, sheet.max_column + 1)
+        if (header := _stringify_header(sheet.get_cell(1, column).value))
+    ]
 
 
 def _transform_sheet(
@@ -314,7 +316,8 @@ def _transform_sheet(
 
 def _write_headers(target: SheetData, years: list[tuple[int, str]]) -> None:
     """Write the fixed header row (columns 1-5) plus one column per year label."""
-    for column, header in enumerate(HEADER_COLUMNS + [label for _, label in years], start=1):
+    all_headers = itertools.chain(HEADER_COLUMNS, (label for _, label in years))
+    for column, header in enumerate(all_headers, start=1):
         target.set_cell(1, column, header, fill_rgb=HEADER_FILL)
 
 
