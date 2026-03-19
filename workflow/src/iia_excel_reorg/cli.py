@@ -128,8 +128,9 @@ def _render_progress_bar(label: str, current: int, total: int, width: int = 24) 
     if total <= 0:
         total = 1
     completed = min(width, int(width * current / total))
-    bar = "#" * completed + "-" * (width - completed)
-    return f"{label}: [{bar}] {current}/{total}"
+    percent = int(100 * current / total)
+    bar = "█" * completed + "·" * (width - completed)
+    return f"{label:<21} │{bar}│ {percent:>3}% ({current}/{total})"
 
 
 def _run_progress(label: str, items: list[tuple[Path, Path]], action: Callable[[tuple[Path, Path]], None]) -> None:

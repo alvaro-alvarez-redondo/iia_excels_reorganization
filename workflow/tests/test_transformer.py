@@ -65,6 +65,19 @@ def _build_numeric_year_workbook(path: Path) -> None:
     write_workbook(path, WorkbookData(sheets=[area]))
 
 
+def _build_multi_continent_workbook(path: Path) -> None:
+    area = SheetData(name="AREA")
+    area.set_cell(1, 2, "1900")
+    area.set_cell(2, 1, "HÉMISPHÈRE SEPTENTRIONAL")
+    area.set_cell(3, 1, "EUROPE.")
+    area.set_cell(4, 1, "Austria", fill_rgb=GREEN)
+    area.set_cell(4, 2, 12, fill_rgb=GREEN)
+    area.set_cell(5, 1, "ASIE.")
+    area.set_cell(6, 1, "Japan", fill_rgb=YELLOW)
+    area.set_cell(6, 2, 8, fill_rgb=YELLOW)
+    write_workbook(path, WorkbookData(sheets=[area]))
+
+
 
 
 
@@ -164,6 +177,37 @@ def test_transform_workbook_preserves_group_colors_and_normalizes_numeric_year_h
     assert area.get_cell(2, 4).fill_rgb is None
     assert area.get_cell(2, 5).fill_rgb is None
     assert area.get_cell(2, 5).value == "reexports"
+
+
+def test_transform_workbook_inserts_blank_row_before_each_new_continent(tmp_path: Path) -> None:
+    source_path = tmp_path / "r_iia_trade_1950_1_1_wheat.xlsx"
+    output_path = tmp_path / "standardized.xlsx"
+    _build_multi_continent_workbook(source_path)
+
+    config_path = tmp_path / "config.yml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "unit_mode: standard",
+                "document_categories:",
+                "  r_iia_trade_1950_1_1_wheat: 1",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    transform_workbook(source_path, output_path, config=load_config(config_path))
+
+    result = read_workbook(output_path)
+    area = result.sheets[0]
+    assert area.get_cell(2, 2).value == "EUROPE"
+    assert area.get_cell(2, 3).value == "Austria"
+    assert area.get_cell(3, 1).value is None
+    assert area.get_cell(3, 2).value is None
+    assert area.get_cell(3, 3).value is None
+    assert area.get_cell(4, 2).value == "ASIE"
+    assert area.get_cell(4, 3).value == "Japan"
+    assert area.get_cell(4, 3).fill_rgb == YELLOW
 
 
 def test_transform_workbook_collects_unique_geography_labels(tmp_path: Path) -> None:
@@ -561,10 +605,10 @@ def test_cli_main_reports_progress_bars(tmp_path: Path, capsys) -> None:
 
     captured = capsys.readouterr()
     assert captured.out == (
-        "Reorganizing folders: [------------------------] 0/1\r"
-        "Reorganizing folders: [########################] 1/1\n"
-        "Reorganizing excels: [------------------------] 0/1\r"
-        "Reorganizing excels: [########################] 1/1\n"
+        "Reorganizing folders  │························│   0% (0/1)\r"
+        "Reorganizing folders  │████████████████████████│ 100% (1/1)\n"
+        "Reorganizing excels   │························│   0% (0/1)\r"
+        "Reorganizing excels   │████████████████████████│ 100% (1/1)\n"
     )
     lists_dir = Path.cwd() / "data" / "lists"
     assert (lists_dir / "unique_geography_values.txt").is_file()

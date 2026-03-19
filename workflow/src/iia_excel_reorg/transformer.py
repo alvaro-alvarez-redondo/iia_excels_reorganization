@@ -261,6 +261,8 @@ def _transform_sheet(
             continue
 
         if _is_continent_row(label):
+            if current_continent and target_row > 2:
+                target_row += 1
             current_continent = _strip_terminal_punctuation(label)
             current_continent_fill = label_cell.fill_rgb
             if geography_index is not None:
