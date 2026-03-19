@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
-from iia_excel_reorg.cli import _compute_output_subdir, _iter_workbooks_structured
+from iia_excel_reorg.cli import _compute_output_subdir, _ensure_workspace, _iter_workbooks_structured
 from iia_excel_reorg.config import load_config
 from iia_excel_reorg.naming import canonical_document_name, extract_source_product, infer_yearbook_metadata, sanitize_name
 from iia_excel_reorg.transformer import transform_workbook
@@ -289,6 +290,45 @@ def test_cli_main_creates_structured_output(tmp_path: Path) -> None:
     assert output_subdir.is_dir(), f"Expected output subdir not found: {output_subdir}"
     xlsx_files = list(output_subdir.glob("*.xlsx"))
     assert len(xlsx_files) == 1
+
+
+def test_ensure_workspace_creates_missing_input_and_output_dirs(tmp_path: Path) -> None:
+    input_dir = tmp_path / "data" / "raw inputs"
+    output_dir = tmp_path / "data" / "10-raw_imports"
+
+    _ensure_workspace(input_dir, output_dir)
+
+    assert input_dir.is_dir()
+    assert output_dir.is_dir()
+
+
+def test_cli_main_creates_default_workspace_and_exits_cleanly_when_input_is_empty(tmp_path: Path, capsys) -> None:
+    from iia_excel_reorg.cli import main
+
+    config_path = tmp_path / "config.yml"
+    config_path.write_text("unit_mode: standard\n", encoding="utf-8")
+
+    import sys
+    orig_argv = sys.argv
+    orig_cwd = Path.cwd()
+    try:
+        sys.argv = [
+            "iia-excel-reorg",
+            str(tmp_path / "data" / "raw inputs"),
+            str(tmp_path / "data" / "10-raw_imports"),
+            "--config",
+            str(config_path),
+        ]
+        os.chdir(tmp_path)
+        main()
+    finally:
+        sys.argv = orig_argv
+        os.chdir(orig_cwd)
+
+    captured = capsys.readouterr()
+    assert "No Excel workbooks found in:" in captured.out
+    assert (tmp_path / "data" / "raw inputs").is_dir()
+    assert (tmp_path / "data" / "10-raw_imports").is_dir()
 
 
 

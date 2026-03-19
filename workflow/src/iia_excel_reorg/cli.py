@@ -10,6 +10,8 @@ from .transformer import transform_workbook
 
 _EXTRACTED_PAGES_RE = re.compile(r"^extracted_pages_(?P<year>\d{4})_\d{2}$", re.IGNORECASE)
 _EXCEL_PATTERNS = ("*.xlsx", "*.xlsm")
+DEFAULT_INPUT_DIR = Path("data/raw inputs")
+DEFAULT_OUTPUT_DIR = Path("data/10-raw_imports")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -104,12 +106,20 @@ def _iter_workbooks_structured(root: Path) -> list[tuple[Path, Path]]:
     return entries
 
 
+def _ensure_workspace(input_path: Path, output_root: Path) -> None:
+    """Create the default workflow folders when they do not exist yet."""
+    if not input_path.exists() and input_path.suffix == "":
+        input_path.mkdir(parents=True, exist_ok=True)
+    output_root.mkdir(parents=True, exist_ok=True)
+
+
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
 
     input_path = Path(args.input)
     output_root = Path(args.output_dir)
+    _ensure_workspace(input_path, output_root)
     config = load_config(args.config)
 
     if input_path.is_file():
@@ -121,7 +131,9 @@ def main() -> None:
             workbook_entries = [(wb, Path(".")) for wb in flat]
 
     if not workbook_entries:
-        parser.error(f"No Excel workbooks found in: {input_path}")
+        print(f"No Excel workbooks found in: {input_path}")
+        print(f"Created workspace folders if needed. Add source Excel files there and run again.")
+        return
 
     for workbook, output_subdir in workbook_entries:
         output_dir = output_root / output_subdir
