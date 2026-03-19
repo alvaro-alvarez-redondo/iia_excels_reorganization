@@ -158,6 +158,25 @@ class GeographyIndex:
         return path
 
 
+@dataclass(slots=True)
+class ProductIndex:
+    products: set[str] = field(default_factory=set)
+
+    def add_product(self, value: str) -> None:
+        if value:
+            self.products.add(value)
+
+    def write_txt(self, path: str | Path) -> Path:
+        path = Path(path)
+        lines = [
+            "[products]",
+            *sorted(self.products),
+            "",
+        ]
+        path.write_text("\n".join(lines), encoding="utf-8")
+        return path
+
+
 
 def transform_workbook(
     input_path: str | Path,
@@ -242,6 +261,8 @@ def _transform_sheet(
             continue
 
         if _is_continent_row(label):
+            if current_continent and target_row > 2:
+                target_row += 1
             current_continent = _strip_terminal_punctuation(label)
             current_continent_fill = label_cell.fill_rgb
             if geography_index is not None:

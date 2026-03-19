@@ -127,16 +127,17 @@ The transformer currently supports the rules you specified:
 - strips source suffixes such as `sup`, `prod`, `rend`, `imp`, `exp`, and `num` before translating the product portion of the document name
 - supports both the standard iia unit rules and the special `inputs` unit rules
 - includes automated tests and a GitHub Actions CI workflow
+- writes text indexes under `data/lists/`, including unique geography values and unique renamed product values
 
 ## Project structure
 
 ```text
 .
 ├── .github/workflows/ci.yml
-├── pyproject.toml
-├── pytest.ini
-├── setup.py
 ├── workflow/                    ← scripts + config
+│   ├── pyproject.toml
+│   ├── pytest.ini
+│   ├── setup.py
 │   ├── config/example.units.yml
 │   ├── src/iia_excel_reorg/
 │   │   ├── __init__.py
@@ -149,21 +150,22 @@ The transformer currently supports the rules you specified:
 │   └── tests/test_transformer.py
 └── data/                        ← input + output
     ├── raw_inputs/              ← place source Excel files here
-    └── 10-raw_imports/          ← transformed output written here
+    ├── 10-raw_imports/          ← transformed output written here
+    └── lists/                   ← generated text indexes (geography + products)
 ```
 
 ## Installation
 
 > **Important:** always install the package through `pip`, not by running
-> `setup.py` directly.  Running `python setup.py install` (or `%run setup.py`
-> in IPython) will fail with `ModuleNotFoundError: No module named 'setuptools'`
+> `workflow/setup.py` directly.  Running `python workflow/setup.py install`
+> (or `%run workflow/setup.py` in IPython) will fail with `ModuleNotFoundError: No module named 'setuptools'`
 > unless setuptools happens to be pre-installed in your environment.  `pip`
 > handles the build-system bootstrapping for you automatically.
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -e .[dev]
+pip install -e ./workflow[dev]
 ```
 
 ## One-click VS Code runner

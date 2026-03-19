@@ -9,14 +9,17 @@ from typing import Callable
 
 from .config import load_config
 from .naming import sanitize_name
-from .transformer import GeographyIndex, transform_workbook
+from .transformer import GeographyIndex, ProductIndex, transform_workbook
+from .unit_rules import derive_product_from_document
 
 _EXTRACTED_PAGES_RE = re.compile(r"^extracted_pages_(?P<year>\d{4})_\d{2}$", re.IGNORECASE)
 _EXCEL_PATTERNS = ("*.xlsx", "*.xlsm")
 DEFAULT_INPUT_DIR = Path("data/raw_inputs")
 DEFAULT_OUTPUT_DIR = Path("data/10-raw_imports")
 GEOGRAPHY_INDEX_FILENAME = "unique_geography_values.txt"
+PRODUCT_INDEX_FILENAME = "unique_product_values.txt"
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
+LISTS_DIR = PROJECT_ROOT / "data" / "lists"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -118,14 +121,16 @@ def _ensure_workspace(input_path: Path, output_root: Path) -> None:
     if output_root.exists():
         shutil.rmtree(output_root)
     output_root.mkdir(parents=True, exist_ok=True)
+    LISTS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def _render_progress_bar(label: str, current: int, total: int, width: int = 24) -> str:
     if total <= 0:
         total = 1
     completed = min(width, int(width * current / total))
-    bar = "#" * completed + "-" * (width - completed)
-    return f"{label}: [{bar}] {current}/{total}"
+    percent = int(100 * current / total)
+    bar = "█" * completed + "·" * (width - completed)
+    return f"{label:<21} │{bar}│ {percent:>3}% ({current}/{total})"
 
 
 def _run_progress(label: str, items: list[tuple[Path, Path]], action: Callable[[tuple[Path, Path]], None]) -> None:
@@ -162,6 +167,7 @@ def main() -> None:
         return
 
     geography_index = GeographyIndex()
+    product_index = ProductIndex()
 
     def prepare_output(entry: tuple[Path, Path]) -> None:
         _workbook, output_subdir = entry
@@ -174,10 +180,12 @@ def main() -> None:
         output_name = f"{sanitize_name(config.canonical_name_for_document(workbook))}.xlsx"
         output_path = output_dir / output_name
         transform_workbook(workbook, output_path, config=config, geography_index=geography_index)
+        product_index.add_product(derive_product_from_document(output_path.name))
 
     _run_progress("Reorganizing folders", workbook_entries, prepare_output)
     _run_progress("Reorganizing excels", workbook_entries, transform_entry)
-    geography_index.write_txt(PROJECT_ROOT / GEOGRAPHY_INDEX_FILENAME)
+    geography_index.write_txt(LISTS_DIR / GEOGRAPHY_INDEX_FILENAME)
+    product_index.write_txt(LISTS_DIR / PRODUCT_INDEX_FILENAME)
 
 
 if __name__ == "__main__":
