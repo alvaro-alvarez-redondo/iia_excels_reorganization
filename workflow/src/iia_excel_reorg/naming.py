@@ -90,10 +90,7 @@ def extract_source_product(document_path: str | Path) -> str:
 
 
 
-def canonical_document_name(
-    document_path: str | Path,
-    product_translations: dict[str, str] | None = None,
-) -> str:
+def canonical_document_name(document_path: str | Path, product_translations: dict[str, str] | None = None) -> str:
     path = Path(document_path)
     stem = path.stem
     if stem.startswith("r_") and not stem.startswith(REVIEWED_PREFIX):
@@ -105,11 +102,16 @@ def canonical_document_name(
 
     metadata = infer_yearbook_metadata(path)
     source_product = extract_source_product(path)
+    aliases = {
+        normalize_text(key): normalize_text(value)
+        for key, value in (product_aliases or {}).items()
+    }
+    canonical_product = aliases.get(source_product, source_product)
     translations = {
         **DEFAULT_PRODUCT_TRANSLATIONS,
         **{normalize_text(key): normalize_text(value) for key, value in (product_translations or {}).items()},
     }
-    english_product = translations.get(source_product, _auto_translate_product(source_product))
+    english_product = translations.get(canonical_product, _auto_translate_product(canonical_product))
     product_slug = english_product.replace(" ", "_")
     raw = f"r_iia_{metadata['yearbook']}_{metadata['year']}_{match.group('start')}_{match.group('end')}_{product_slug}"
     return sanitize_name(raw)
