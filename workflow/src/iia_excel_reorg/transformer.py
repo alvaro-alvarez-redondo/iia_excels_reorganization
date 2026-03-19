@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import re
+import unicodedata
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from .config import WorkbookConfig
@@ -28,11 +30,47 @@ class TransformationError(RuntimeError):
     """Raised when a source worksheet cannot be transformed."""
 
 
+@dataclass(slots=True)
+class GeographyIndex:
+    countries: set[str] = field(default_factory=set)
+    continents: set[str] = field(default_factory=set)
+    hemispheres: set[str] = field(default_factory=set)
+
+    def add_country(self, value: str) -> None:
+        if value:
+            self.countries.add(value)
+
+    def add_continent(self, value: str) -> None:
+        if value:
+            self.continents.add(value)
+
+    def add_hemisphere(self, value: str) -> None:
+        if value:
+            self.hemispheres.add(value)
+
+    def write_txt(self, path: str | Path) -> Path:
+        path = Path(path)
+        lines = [
+            "[hemispheres]",
+            *sorted(self.hemispheres),
+            "",
+            "[continents]",
+            *sorted(self.continents),
+            "",
+            "[countries]",
+            *sorted(self.countries),
+            "",
+        ]
+        path.write_text("\n".join(lines), encoding="utf-8")
+        return path
+
+
 
 def transform_workbook(
     input_path: str | Path,
     output_path: str | Path,
     config: WorkbookConfig | None = None,
+    geography_index: GeographyIndex | None = None,
 ) -> Path:
     config = config or WorkbookConfig()
     input_path = Path(input_path)
@@ -59,6 +97,7 @@ def transform_workbook(
                 source_sheet=source_sheet,
                 years=years,
                 unit=unit,
+                geography_index=geography_index,
             )
         )
 
@@ -73,19 +112,27 @@ def _extract_year_headers(sheet: SheetData) -> list[tuple[int, str]]:
     headers: list[tuple[int, str]] = []
     for column in range(2, sheet.max_column + 1):
         value = sheet.get_cell(1, column).value
-        if value is None or str(value).strip() == "":
+        header = _stringify_header(value)
+        if header == "":
             continue
-        headers.append((column, str(value).strip()))
+        headers.append((column, header))
     return headers
 
 
 
-def _transform_sheet(source_sheet: SheetData, years: list[tuple[int, str]], unit: str) -> SheetData:
+def _transform_sheet(
+    source_sheet: SheetData,
+    years: list[tuple[int, str]],
+    unit: str,
+    geography_index: GeographyIndex | None = None,
+) -> SheetData:
     target = SheetData(name=source_sheet.name.lower())
     _write_headers(target, years)
 
     current_hemisphere = ""
+    current_hemisphere_fill: str | None = None
     current_continent = ""
+    current_continent_fill: str | None = None
     target_row = 2
 
     for row in range(2, source_sheet.max_row + 1):
@@ -96,18 +143,26 @@ def _transform_sheet(source_sheet: SheetData, years: list[tuple[int, str]], unit
 
         if _is_hemisphere_row(label):
             current_hemisphere = _strip_terminal_punctuation(label)
+            current_hemisphere_fill = label_cell.fill_rgb
+            if geography_index is not None:
+                geography_index.add_hemisphere(current_hemisphere)
             continue
 
         if _is_continent_row(label):
             current_continent = _strip_terminal_punctuation(label)
+            current_continent_fill = label_cell.fill_rgb
+            if geography_index is not None:
+                geography_index.add_continent(current_continent)
             continue
 
         country, footnotes = _extract_country_and_footnotes(label)
-        for column, value in enumerate(
-            [current_hemisphere, current_continent, country, unit, footnotes],
-            start=1,
-        ):
-            target.set_cell(target_row, column, value, fill_rgb=label_cell.fill_rgb)
+        if geography_index is not None:
+            geography_index.add_country(country)
+        target.set_cell(target_row, 1, current_hemisphere, fill_rgb=current_hemisphere_fill)
+        target.set_cell(target_row, 2, current_continent, fill_rgb=current_continent_fill)
+        target.set_cell(target_row, 3, country, fill_rgb=label_cell.fill_rgb)
+        target.set_cell(target_row, 4, unit)
+        target.set_cell(target_row, 5, footnotes)
 
         for offset, (source_column, _label) in enumerate(years, start=6):
             source_value = source_sheet.get_cell(row, source_column)
@@ -131,6 +186,14 @@ def _clean_text(value: object) -> str:
     return str(value).strip()
 
 
+def _stringify_header(value: object) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value).strip()
+
+
 
 def _strip_terminal_punctuation(value: str) -> str:
     return value.strip().rstrip(".:")
@@ -138,17 +201,9 @@ def _strip_terminal_punctuation(value: str) -> str:
 
 
 def _normalize_label(value: str) -> str:
-    substitutions = str.maketrans({
-        "É": "E",
-        "È": "E",
-        "Ê": "E",
-        "Á": "A",
-        "À": "A",
-        "Í": "I",
-        "Ó": "O",
-        "Ú": "U",
-    })
-    return value.upper().translate(substitutions)
+    normalized = unicodedata.normalize("NFKD", value)
+    ascii_only = normalized.encode("ascii", "ignore").decode("ascii")
+    return ascii_only.upper()
 
 
 
@@ -164,7 +219,13 @@ def _is_continent_row(label: str) -> bool:
 
 
 def _extract_country_and_footnotes(label: str) -> tuple[str, str]:
-    notes = [match.strip() for match in PAREN_RE.findall(label) if match.strip()]
+    notes = [_normalize_footnote(match.strip()) for match in PAREN_RE.findall(label) if match.strip()]
     country = PAREN_RE.sub("", label)
     country = re.sub(r"\s+", " ", country).strip().rstrip("-;,")
     return country, "; ".join(notes)
+
+
+def _normalize_footnote(note: str) -> str:
+    if note.lower() == "r":
+        return "reexports"
+    return note
