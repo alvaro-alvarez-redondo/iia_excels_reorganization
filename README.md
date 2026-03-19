@@ -127,6 +127,7 @@ The transformer currently supports the rules you specified:
 - strips source suffixes such as `sup`, `prod`, `rend`, `imp`, `exp`, and `num` before translating the product portion of the document name
 - supports both the standard iia unit rules and the special `inputs` unit rules
 - includes automated tests and a GitHub Actions CI workflow
+- writes text indexes under `data/lists/`, including unique geography values and unique renamed product values
 
 ## Project structure
 
@@ -149,7 +150,8 @@ The transformer currently supports the rules you specified:
 │   └── tests/test_transformer.py
 └── data/                        ← input + output
     ├── raw_inputs/              ← place source Excel files here
-    └── 10-raw_imports/          ← transformed output written here
+    ├── 10-raw_imports/          ← transformed output written here
+    └── lists/                   ← generated text indexes (geography + products)
 ```
 
 ## Installation

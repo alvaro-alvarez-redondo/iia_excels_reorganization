@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import os
+import importlib.util
 from pathlib import Path
 
 from iia_excel_reorg.cli import _compute_output_subdir, _ensure_workspace, _iter_workbooks_structured
 from iia_excel_reorg.config import WorkbookConfig, load_config
 from iia_excel_reorg.naming import canonical_document_name, extract_source_product, infer_yearbook_metadata, sanitize_name
-from iia_excel_reorg.transformer import GeographyIndex, _is_continent_row, _is_hemisphere_row, transform_workbook
+from iia_excel_reorg.transformer import GeographyIndex, ProductIndex, _is_continent_row, _is_hemisphere_row, transform_workbook
 from iia_excel_reorg.unit_rules import assign_unit
 from iia_excel_reorg.xlsx_io import SheetData, WorkbookData, read_workbook, write_workbook
 
@@ -212,6 +213,26 @@ def test_transform_workbook_collects_unique_geography_labels(tmp_path: Path) -> 
 
 
 
+def test_product_index_writes_sorted_unique_products(tmp_path: Path) -> None:
+    product_index = ProductIndex()
+    product_index.add_product("rice")
+    product_index.add_product("wheat")
+    product_index.add_product("rice")
+
+    index_path = tmp_path / "unique_product_values.txt"
+    product_index.write_txt(index_path)
+
+    assert index_path.read_text(encoding="utf-8") == "\n".join(
+        [
+            "[products]",
+            "rice",
+            "wheat",
+            "",
+        ]
+    )
+
+
+
 def test_transform_workbook_supports_inputs_mode_and_harmonized_output_names(tmp_path: Path) -> None:
     source_dir = tmp_path / "raw_inputs" / "trade" / "extracted_pages_1938_39"
     source_dir.mkdir(parents=True)
@@ -262,20 +283,34 @@ def test_canonical_document_name_auto_translates_unknown_products(monkeypatch) -
 def test_canonical_document_name_applies_alias_before_translation() -> None:
     path = Path("raw_inputs/trade/extracted_pages_1938_39/reviewed_12_13teaimp.xlsx")
 
-    assert canonical_document_name(path, product_aliases={"tea": "te"}) == "r_iia_trade_1938_12_13_tea"
+    assert canonical_document_name(
+        path,
+        product_translations={"te": "tea"},
+        product_aliases={"tea": "te"},
+    ) == "r_iia_trade_1938_12_13_tea"
 
 
 def test_naming_and_unit_rules_cover_reviewed_documents() -> None:
     path = Path("raw_inputs/trade/extracted_pages_1938_39/reviewed_239_239azucar_caña_brutaprod.xlsx")
     assert infer_yearbook_metadata(path) == {"agency": "iia", "yearbook": "trade", "year": "1938"}
     assert extract_source_product(path) == "azucar cana bruta"
-    assert canonical_document_name(path) == "r_iia_trade_1938_239_239_raw_cane_sugar"
+    assert canonical_document_name(path, product_translations={"azucar cana bruta": "raw cane sugar"}) == "r_iia_trade_1938_239_239_raw_cane_sugar"
     assert assign_unit("imports", "te", 1) == "tonnes"
     assert assign_unit("imports", "te", 2) == "q"
     assert assign_unit("production", "vino", 1) == "1000 hl"
     assert assign_unit("production", "huevos", 2) == "1000 eggs"
     assert assign_unit("livestock", "whatever", 1) == "1000 heads"
     assert assign_unit("production", "whatever", None) == ""
+
+
+def test_canonical_document_name_translates_multiword_reviewed_product_at_end(monkeypatch) -> None:
+    from iia_excel_reorg import naming
+
+    monkeypatch.setattr(naming, "_auto_translate_product", lambda value: "raw beet sugar")
+    path = Path("raw_inputs/trade/extracted_pages_1938_39/reviewed_238_238azucar_remolacha_brutaprod.xlsx")
+
+    assert extract_source_product(path) == "azucar remolacha bruta"
+    assert canonical_document_name(path) == "r_iia_trade_1938_238_238_raw_beet_sugar"
 
 
 
@@ -311,10 +346,30 @@ def test_load_config_parses_rule_based_yaml(tmp_path: Path) -> None:
 
 
 def test_workbook_config_canonical_name_uses_product_aliases() -> None:
-    config = WorkbookConfig(product_aliases={"tea": "te"})
+    config = WorkbookConfig(product_aliases={"tea": "te"}, product_translations={"te": "tea"})
     path = Path("raw_inputs/trade/extracted_pages_1938_39/reviewed_12_13teaimp.xlsx")
 
     assert config.canonical_name_for_document(path) == "r_iia_trade_1938_12_13_tea"
+
+
+def test_run_project_bootstraps_deep_translator(monkeypatch) -> None:
+    spec = importlib.util.spec_from_file_location("run_project", Path(__file__).resolve().parents[2] / "run_project.py")
+    assert spec is not None and spec.loader is not None
+    run_project = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(run_project)
+
+    commands: list[list[str]] = []
+
+    monkeypatch.setattr(importlib.util, "find_spec", lambda name: None if name == "deep_translator" else object())
+    monkeypatch.setattr(
+        run_project.subprocess,
+        "check_call",
+        lambda command: commands.append(command) or 0,
+    )
+
+    run_project._ensure_translation_dependency()
+
+    assert commands == [[run_project.sys.executable, "-m", "pip", "install", "deep-translator>=1.11.4"]]
 
 
 
@@ -421,11 +476,16 @@ def test_cli_main_creates_structured_output(tmp_path: Path) -> None:
 def test_ensure_workspace_creates_missing_input_and_output_dirs(tmp_path: Path) -> None:
     input_dir = tmp_path / "data" / "raw_inputs"
     output_dir = tmp_path / "data" / "10-raw_imports"
+    lists_dir = Path.cwd() / "data" / "lists"
+    had_lists_dir = lists_dir.exists()
 
     _ensure_workspace(input_dir, output_dir)
 
     assert input_dir.is_dir()
     assert output_dir.is_dir()
+    assert lists_dir.is_dir()
+    if not had_lists_dir:
+        lists_dir.rmdir()
 
 
 def test_ensure_workspace_overwrites_existing_output_dir(tmp_path: Path) -> None:
@@ -506,8 +566,23 @@ def test_cli_main_reports_progress_bars(tmp_path: Path, capsys) -> None:
         "Reorganizing excels: [------------------------] 0/1\r"
         "Reorganizing excels: [########################] 1/1\n"
     )
-    assert (Path.cwd() / "unique_geography_values.txt").is_file()
-    (Path.cwd() / "unique_geography_values.txt").unlink()
+    lists_dir = Path.cwd() / "data" / "lists"
+    assert (lists_dir / "unique_geography_values.txt").is_file()
+    assert (lists_dir / "unique_product_values.txt").is_file()
+    assert (lists_dir / "unique_product_values.txt").read_text(encoding="utf-8") == "\n".join(
+        [
+            "[products]",
+            "wheat",
+            "",
+        ]
+    )
+    (lists_dir / "unique_geography_values.txt").unlink()
+    (lists_dir / "unique_product_values.txt").unlink()
+    try:
+        lists_dir.rmdir()
+        (Path.cwd() / "data").rmdir()
+    except OSError:
+        pass
 
 
 
