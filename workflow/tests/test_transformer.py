@@ -6,7 +6,7 @@ from pathlib import Path
 from iia_excel_reorg.cli import _compute_output_subdir, _ensure_workspace, _iter_workbooks_structured
 from iia_excel_reorg.config import load_config
 from iia_excel_reorg.naming import canonical_document_name, extract_source_product, infer_yearbook_metadata, sanitize_name
-from iia_excel_reorg.transformer import GeographyIndex, transform_workbook
+from iia_excel_reorg.transformer import GeographyIndex, _is_continent_row, _is_hemisphere_row, transform_workbook
 from iia_excel_reorg.unit_rules import assign_unit
 from iia_excel_reorg.xlsx_io import SheetData, WorkbookData, read_workbook, write_workbook
 
@@ -63,6 +63,20 @@ def _build_numeric_year_workbook(path: Path) -> None:
     area.set_cell(4, 2, 12, fill_rgb=GREEN)
     write_workbook(path, WorkbookData(sheets=[area]))
 
+
+
+
+
+def test_geography_detection_handles_known_ocr_and_accent_variants() -> None:
+    assert _is_continent_row("AMÉR DU NORD ET AMÉR CENTRALE")
+    assert _is_continent_row("Amérique méridionale")
+    assert _is_continent_row("OCRANIE.")
+    assert _is_continent_row("AUSTRALIE")
+    assert _is_hemisphere_row("HÉMISHPÈRE SEPTENTRIONAL")
+    assert _is_hemisphere_row("HÊMISPHÊRE SEPTENTRIONAL")
+    assert _is_hemisphere_row("HÉMISPHÈRE SUDAFRIQUE.")
+    assert not _is_continent_row("Canada")
+    assert not _is_hemisphere_row("Canada")
 
 
 def test_transform_workbook_assigns_units_from_rules_and_preserves_notes(tmp_path: Path) -> None:
@@ -234,6 +248,15 @@ def test_transform_workbook_supports_inputs_mode_and_harmonized_output_names(tmp
     assert imports.get_cell(2, 6).value == 7.5
     assert imports.get_cell(2, 7).value == 0.2
 
+
+
+def test_canonical_document_name_auto_translates_unknown_products(monkeypatch) -> None:
+    from iia_excel_reorg import naming
+
+    monkeypatch.setattr(naming, "_auto_translate_product", lambda value: "cocoa beans")
+    path = Path("raw_inputs/trade/extracted_pages_1938_39/reviewed_12_13cacaoimp.xlsx")
+
+    assert canonical_document_name(path) == "r_iia_trade_1938_12_13_cocoa_beans"
 
 
 def test_naming_and_unit_rules_cover_reviewed_documents() -> None:
@@ -464,8 +487,12 @@ def test_cli_main_reports_progress_bars(tmp_path: Path, capsys) -> None:
         sys.argv = orig_argv
 
     captured = capsys.readouterr()
-    assert "Reorganizing folders:" in captured.out
-    assert "Reorganizing excels:" in captured.out
+    assert captured.out == (
+        "Reorganizing folders: [------------------------] 0/1\r"
+        "Reorganizing folders: [########################] 1/1\n"
+        "Reorganizing excels: [------------------------] 0/1\r"
+        "Reorganizing excels: [########################] 1/1\n"
+    )
     assert (tmp_path / "outputs" / "unique_geography_values.txt").is_file()
 
 
