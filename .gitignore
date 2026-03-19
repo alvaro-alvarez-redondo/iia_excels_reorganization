@@ -1,6 +1,7 @@
 __pycache__/
 *.pyc
 *.egg-info/
+*.txt
 
 # Workspace folders are created automatically by the Python runner/CLI.
 # Keep the whole data tree out of Git.
