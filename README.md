@@ -166,6 +166,23 @@ source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -e .[dev]
 ```
 
+## One-click VS Code runner
+
+If you want a single file that you can open in VS Code and launch with the
+**Run** button, use the repository-root script:
+
+```bash
+python run_project.py
+```
+
+That wrapper adds `workflow/src` to `sys.path` and, when no arguments are
+provided, automatically uses `workflow/config/example.units.yml`.  You can still
+override the defaults by passing the same arguments supported by the main CLI:
+
+```bash
+python run_project.py "data/raw inputs" "data/10-raw_imports" --config workflow/config/example.units.yml
+```
+
 > **Folder name:** the input directory is called **`data/raw inputs/`** (with a
 > space in `raw inputs`).  Make sure you place your Excel files under
 > `data/raw inputs/` at the project root.
