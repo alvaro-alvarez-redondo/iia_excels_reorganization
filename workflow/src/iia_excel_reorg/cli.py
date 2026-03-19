@@ -8,9 +8,9 @@ from pathlib import Path
 from typing import Callable
 
 from .config import load_config
-from .naming import sanitize_name
-from .transformer import GeographyIndex, ProductIndex, transform_workbook
-from .unit_rules import derive_product_from_document
+from .utils.naming import sanitize_name
+from .core.transformer import GeographyIndex, ProductIndex, transform_workbook
+from .utils.text import derive_product_from_document
 
 _EXTRACTED_PAGES_RE = re.compile(r"^extracted_pages_(?P<year>\d{4})_\d{2}$", re.IGNORECASE)
 _EXCEL_PATTERNS = ("*.xlsx", "*.xlsm")

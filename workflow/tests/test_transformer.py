@@ -316,7 +316,7 @@ def test_transform_workbook_supports_inputs_mode_and_harmonized_output_names(tmp
 
 
 def test_canonical_document_name_auto_translates_unknown_products(monkeypatch) -> None:
-    from iia_excel_reorg import naming
+    from iia_excel_reorg.utils import naming
 
     monkeypatch.setattr(naming, "_auto_translate_product", lambda value: "cocoa beans")
     path = Path("raw_inputs/trade/extracted_pages_1938_39/reviewed_12_13cacaoimp.xlsx")
@@ -348,7 +348,7 @@ def test_naming_and_unit_rules_cover_reviewed_documents() -> None:
 
 
 def test_canonical_document_name_translates_multiword_reviewed_product_at_end(monkeypatch) -> None:
-    from iia_excel_reorg import naming
+    from iia_excel_reorg.utils import naming
 
     monkeypatch.setattr(naming, "_auto_translate_product", lambda value: "raw beet sugar")
     path = Path("raw_inputs/trade/extracted_pages_1938_39/reviewed_238_238azucar_remolacha_brutaprod.xlsx")

@@ -3,8 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .naming import canonical_document_name, extract_source_product
-from .unit_rules import normalize_text
+from .utils.naming import canonical_document_name, extract_source_product
+from .utils.text import normalize_text
 
 
 @dataclass(slots=True)
@@ -129,7 +129,7 @@ def _parse_simple_yaml(text: str) -> dict[str, object]:
 
 
 def _normalize_alias_map(raw_mapping: dict[str, object] | None) -> dict[str, str]:
-    """Normalise both keys and values of *raw_mapping* using :func:`~unit_rules.normalize_text`.
+    """Normalise both keys and values of *raw_mapping* using :func:`~utils.text.normalize_text`.
 
     Returns an empty dict when *raw_mapping* is ``None`` or empty.
     """
