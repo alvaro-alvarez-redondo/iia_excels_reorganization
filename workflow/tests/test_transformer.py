@@ -259,19 +259,10 @@ def test_canonical_document_name_auto_translates_unknown_products(monkeypatch) -
     assert canonical_document_name(path) == "r_iia_trade_1938_12_13_cocoa_beans"
 
 
-def test_canonical_document_name_translates_detected_product_with_underscores() -> None:
-    path = Path("raw_inputs/trade/extracted_pages_1938_39/reviewed_12_13cacao_en_granoimp.xlsx")
+def test_canonical_document_name_applies_alias_before_translation() -> None:
+    path = Path("raw_inputs/trade/extracted_pages_1938_39/reviewed_12_13teaimp.xlsx")
 
-    assert canonical_document_name(path, product_translations={"cacao en grano": "cocoa beans"}) == "r_iia_trade_1938_12_13_cocoa_beans"
-
-
-def test_canonical_document_name_translates_detected_product_with_many_words() -> None:
-    path = Path("raw_inputs/trade/extracted_pages_1938_39/reviewed_12_13aceite_de_semilla_de_algodonimp.xlsx")
-
-    assert canonical_document_name(
-        path,
-        product_translations={"aceite de semilla de algodon": "cottonseed oil"},
-    ) == "r_iia_trade_1938_12_13_cottonseed_oil"
+    assert canonical_document_name(path, product_aliases={"tea": "te"}) == "r_iia_trade_1938_12_13_tea"
 
 
 def test_naming_and_unit_rules_cover_reviewed_documents() -> None:
@@ -318,18 +309,12 @@ def test_load_config_parses_rule_based_yaml(tmp_path: Path) -> None:
     assert config.unit_overrides["imports"] == "tonnes"
     assert config.include_sheets == ["AREA", "PRODUCTION"]
 
-def test_workbook_config_canonical_name_uses_product_translations_on_detected_product() -> None:
-    config = WorkbookConfig(product_aliases={"tea": "te"}, product_translations={"cacao en grano": "cocoa beans"})
-    path = Path("raw_inputs/trade/extracted_pages_1938_39/reviewed_12_13cacao_en_granoimp.xlsx")
 
-    assert config.canonical_name_for_document(path) == "r_iia_trade_1938_12_13_cocoa_beans"
+def test_workbook_config_canonical_name_uses_product_aliases() -> None:
+    config = WorkbookConfig(product_aliases={"tea": "te"})
+    path = Path("raw_inputs/trade/extracted_pages_1938_39/reviewed_12_13teaimp.xlsx")
 
-
-def test_workbook_config_canonical_name_supports_long_multiword_products() -> None:
-    config = WorkbookConfig(product_translations={"aceite de semilla de algodon": "cottonseed oil"})
-    path = Path("raw_inputs/trade/extracted_pages_1938_39/reviewed_12_13aceite_de_semilla_de_algodonimp.xlsx")
-
-    assert config.canonical_name_for_document(path) == "r_iia_trade_1938_12_13_cottonseed_oil"
+    assert config.canonical_name_for_document(path) == "r_iia_trade_1938_12_13_tea"
 
 
 

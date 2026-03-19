@@ -25,7 +25,7 @@ class WorkbookConfig:
         return sheet_name.upper() in allowed
 
     def canonical_name_for_document(self, document_name: str | Path) -> str:
-        return canonical_document_name(document_name, self.product_translations)
+        return canonical_document_name(document_name, self.product_translations, self.product_aliases)
 
     def category_for_document(self, document_name: str | Path) -> int | None:
         stem = Path(document_name).stem
