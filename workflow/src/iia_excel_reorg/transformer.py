@@ -16,6 +16,7 @@ HEMISPHERE_RE = re.compile(r"h[eéê]misph[eèê]?re|hemisphere", re.IGNORECASE)
 
 
 def _normalize_known_geography_label(value: str) -> str:
+    """Strip accents, fold to ASCII lowercase, and strip trailing punctuation."""
     normalized = unicodedata.normalize("NFKD", value)
     ascii_only = normalized.encode("ascii", "ignore").decode("ascii")
     return ascii_only.casefold().strip().rstrip(".:")
@@ -118,13 +119,14 @@ RAW_HEMISPHERE_LABELS = (
 KNOWN_HEMISPHERES = {_normalize_known_geography_label(label) for label in RAW_HEMISPHERE_LABELS}
 
 
-
 class TransformationError(RuntimeError):
     """Raised when a source worksheet cannot be transformed."""
 
 
 @dataclass(slots=True)
 class GeographyIndex:
+    """Accumulates unique hemisphere, continent, and country labels seen during transformation."""
+
     countries: set[str] = field(default_factory=set)
     continents: set[str] = field(default_factory=set)
     hemispheres: set[str] = field(default_factory=set)
@@ -142,6 +144,7 @@ class GeographyIndex:
             self.hemispheres.add(value)
 
     def write_txt(self, path: str | Path) -> Path:
+        """Write sorted geography labels to *path* in an INI-like text format."""
         path = Path(path)
         lines = [
             "[hemispheres]",
@@ -160,6 +163,8 @@ class GeographyIndex:
 
 @dataclass(slots=True)
 class ProductIndex:
+    """Accumulates unique product labels seen across all transformed workbooks."""
+
     products: set[str] = field(default_factory=set)
 
     def add_product(self, value: str) -> None:
@@ -167,6 +172,7 @@ class ProductIndex:
             self.products.add(value)
 
     def write_txt(self, path: str | Path) -> Path:
+        """Write sorted product labels to *path* in an INI-like text format."""
         path = Path(path)
         lines = [
             "[products]",
@@ -177,13 +183,27 @@ class ProductIndex:
         return path
 
 
-
 def transform_workbook(
     input_path: str | Path,
     output_path: str | Path,
     config: WorkbookConfig | None = None,
     geography_index: GeographyIndex | None = None,
 ) -> Path:
+    """Read *input_path*, transform each eligible sheet, and write to *output_path*.
+
+    Parameters
+    ----------
+    input_path:
+        Source ``.xlsx`` workbook to process.
+    output_path:
+        Destination path for the reorganised workbook.
+    config:
+        Optional :class:`~iia_excel_reorg.config.WorkbookConfig`; defaults to
+        an unconfigured instance (no unit mode, no filters).
+    geography_index:
+        When provided, discovered hemispheres/continents/countries are
+        accumulated into this index for later reporting.
+    """
     config = config or WorkbookConfig()
     input_path = Path(input_path)
     source_wb = read_workbook(input_path)
@@ -219,8 +239,8 @@ def transform_workbook(
     return write_workbook(output_path, WorkbookData(sheets=target_sheets))
 
 
-
 def _extract_year_headers(sheet: SheetData) -> list[tuple[int, str]]:
+    """Return ``[(column_index, label), …]`` for all non-empty header cells in row 1 from column 2 onward."""
     headers: list[tuple[int, str]] = []
     for column in range(2, sheet.max_column + 1):
         value = sheet.get_cell(1, column).value
@@ -231,13 +251,18 @@ def _extract_year_headers(sheet: SheetData) -> list[tuple[int, str]]:
     return headers
 
 
-
 def _transform_sheet(
     source_sheet: SheetData,
     years: list[tuple[int, str]],
     unit: str,
     geography_index: GeographyIndex | None = None,
 ) -> SheetData:
+    """Convert one source sheet into the standardised long-format layout.
+
+    The output sheet has fixed columns ``[hemisphere, continent, country, unit,
+    footnotes]`` followed by one column per year header found in the source.
+    A blank row is inserted before the first country of each new continent group.
+    """
     target = SheetData(name=source_sheet.name.lower())
     _write_headers(target, years)
 
@@ -287,20 +312,25 @@ def _transform_sheet(
     return target
 
 
-
 def _write_headers(target: SheetData, years: list[tuple[int, str]]) -> None:
+    """Write the fixed header row (columns 1-5) plus one column per year label."""
     for column, header in enumerate(HEADER_COLUMNS + [label for _, label in years], start=1):
         target.set_cell(1, column, header, fill_rgb=HEADER_FILL)
 
 
-
 def _clean_text(value: object) -> str:
+    """Return a stripped string representation of *value*, or ``""`` for ``None``."""
     if value is None:
         return ""
     return str(value).strip()
 
 
 def _stringify_header(value: object) -> str:
+    """Convert a cell value to a string year label.
+
+    Integer-valued floats (e.g. ``1900.0``) are rendered without the decimal
+    part so column headers read ``"1900"`` rather than ``"1900.0"``.
+    """
     if value is None:
         return ""
     if isinstance(value, float) and value.is_integer():
@@ -308,30 +338,30 @@ def _stringify_header(value: object) -> str:
     return str(value).strip()
 
 
-
 def _strip_terminal_punctuation(value: str) -> str:
+    """Strip trailing full stops and colons from *value*."""
     return value.strip().rstrip(".:")
 
 
-
-def _normalize_label(value: str) -> str:
-    return _normalize_known_geography_label(value)
-
-
-
 def _is_hemisphere_row(label: str) -> bool:
-    normalized = _normalize_label(_strip_terminal_punctuation(label))
+    """Return ``True`` when *label* identifies a hemisphere header row."""
+    normalized = _normalize_known_geography_label(_strip_terminal_punctuation(label))
     return normalized in KNOWN_HEMISPHERES or bool(HEMISPHERE_RE.search(label))
 
 
-
 def _is_continent_row(label: str) -> bool:
-    normalized = _normalize_label(_strip_terminal_punctuation(label))
+    """Return ``True`` when *label* identifies a continent header row."""
+    normalized = _normalize_known_geography_label(_strip_terminal_punctuation(label))
     return normalized in KNOWN_CONTINENTS
 
 
-
 def _extract_country_and_footnotes(label: str) -> tuple[str, str]:
+    """Split a raw country label into ``(country_name, footnotes_string)``.
+
+    Parenthesised fragments are extracted as footnotes (``"r"`` is expanded to
+    ``"reexports"``).  The remaining text is whitespace-normalised and stripped
+    of trailing punctuation.
+    """
     notes = [_normalize_footnote(match.strip()) for match in PAREN_RE.findall(label) if match.strip()]
     country = PAREN_RE.sub("", label)
     country = re.sub(r"\s+", " ", country).strip().rstrip("-;,")
@@ -339,6 +369,7 @@ def _extract_country_and_footnotes(label: str) -> tuple[str, str]:
 
 
 def _normalize_footnote(note: str) -> str:
+    """Expand the shorthand footnote ``"r"`` to ``"reexports"``."""
     if note.lower() == "r":
         return "reexports"
     return note

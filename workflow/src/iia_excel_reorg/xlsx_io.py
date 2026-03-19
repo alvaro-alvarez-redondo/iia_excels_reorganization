@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
+from functools import reduce
 from pathlib import Path
-from typing import Iterable
 from xml.etree import ElementTree as ET
 from zipfile import ZIP_DEFLATED, ZipFile
 
@@ -12,43 +13,61 @@ PKG_REL_NS = "http://schemas.openxmlformats.org/package/2006/relationships"
 CONTENT_NS = "http://schemas.openxmlformats.org/package/2006/content-types"
 XML_NS = "http://www.w3.org/XML/1998/namespace"
 
+# Pre-compiled pattern to split an OOXML cell reference (e.g. "AB12") into
+# its column letters and row number in a single pass.
+_REF_RE = re.compile(r"([A-Za-z]+)(\d+)")
+
 ET.register_namespace("", MAIN_NS)
 ET.register_namespace("r", REL_NS)
 
 
 @dataclass(slots=True)
 class CellData:
+    """Lightweight container for a single spreadsheet cell's value and fill colour."""
+
     value: str | int | float | None = None
     fill_rgb: str | None = None
 
 
 @dataclass(slots=True)
 class SheetData:
+    """In-memory representation of a single worksheet."""
+
     name: str
     cells: dict[tuple[int, int], CellData] = field(default_factory=dict)
 
     def set_cell(self, row: int, column: int, value: str | int | float | None, fill_rgb: str | None = None) -> None:
+        """Write *value* (and optional *fill_rgb*) at ``(row, column)``."""
         self.cells[(row, column)] = CellData(value=value, fill_rgb=_normalize_rgb(fill_rgb))
 
     def get_cell(self, row: int, column: int) -> CellData:
+        """Return the :class:`CellData` at ``(row, column)``, or an empty cell."""
         return self.cells.get((row, column), CellData())
 
     @property
     def max_row(self) -> int:
+        """1-based index of the last occupied row, or 0 when the sheet is empty."""
         return max((row for row, _ in self.cells), default=0)
 
     @property
     def max_column(self) -> int:
+        """1-based index of the last occupied column, or 0 when the sheet is empty."""
         return max((column for _, column in self.cells), default=0)
 
 
 @dataclass(slots=True)
 class WorkbookData:
+    """In-memory representation of an OOXML workbook."""
+
     sheets: list[SheetData]
 
 
-
 def _normalize_rgb(fill_rgb: str | None) -> str | None:
+    """Normalise a hex colour string to the 8-character ARGB form used by OOXML.
+
+    A 6-character RGB value is prefixed with ``FF`` (fully opaque).  ``None``
+    and empty strings are returned as ``None``.
+    """
     if not fill_rgb:
         return None
     rgb = fill_rgb.strip().upper()
@@ -57,8 +76,8 @@ def _normalize_rgb(fill_rgb: str | None) -> str | None:
     return rgb
 
 
-
 def read_workbook(path: str | Path) -> WorkbookData:
+    """Parse an ``.xlsx`` / ``.xlsm`` file and return its contents as :class:`WorkbookData`."""
     path = Path(path)
     with ZipFile(path) as archive:
         workbook_root = ET.fromstring(archive.read("xl/workbook.xml"))
@@ -81,8 +100,8 @@ def read_workbook(path: str | Path) -> WorkbookData:
         return WorkbookData(sheets=sheets)
 
 
-
 def write_workbook(path: str | Path, workbook: WorkbookData) -> Path:
+    """Serialise *workbook* to an OOXML ``.xlsx`` file at *path* and return the path."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -99,7 +118,6 @@ def write_workbook(path: str | Path, workbook: WorkbookData) -> Path:
     return path
 
 
-
 def _resolve_sheet_targets(workbook_root: ET.Element, rels_root: ET.Element) -> list[tuple[str, str]]:
     rels = {
         rel.attrib["Id"]: rel.attrib["Target"]
@@ -112,7 +130,6 @@ def _resolve_sheet_targets(workbook_root: ET.Element, rels_root: ET.Element) -> 
     return sheets
 
 
-
 def _read_shared_strings(archive: ZipFile) -> list[str]:
     if "xl/sharedStrings.xml" not in archive.namelist():
         return []
@@ -122,7 +139,6 @@ def _read_shared_strings(archive: ZipFile) -> list[str]:
         texts = [node.text or "" for node in si.findall(f".//{{{MAIN_NS}}}t")]
         strings.append("".join(texts))
     return strings
-
 
 
 def _read_fill_map(archive: ZipFile) -> dict[int, str | None]:
@@ -138,7 +154,6 @@ def _read_fill_map(archive: ZipFile) -> dict[int, str | None]:
         fill_id = int(xf.attrib.get("fillId", "0"))
         style_map[idx] = fills[fill_id] if fill_id < len(fills) else None
     return style_map
-
 
 
 def _read_cell_value(cell: ET.Element, shared_strings: list[str]) -> str | int | float | None:
@@ -160,25 +175,25 @@ def _read_cell_value(cell: ET.Element, shared_strings: list[str]) -> str | int |
         return raw
 
 
-
 def _split_ref(ref: str) -> tuple[int, int]:
-    letters = ""
-    numbers = ""
-    for char in ref:
-        if char.isalpha():
-            letters += char
-        else:
-            numbers += char
-    return int(numbers), _column_index_from_letters(letters)
+    """Parse an OOXML cell reference (e.g. ``"AB12"``) into ``(row, column)`` indices.
 
+    Uses a pre-compiled regex instead of a character-by-character loop.
+    """
+    m = _REF_RE.match(ref)
+    if m is None:
+        raise ValueError(f"Invalid cell reference: {ref!r}")
+    return int(m.group(2)), _column_index_from_letters(m.group(1))
 
 
 def _column_index_from_letters(letters: str) -> int:
-    value = 0
-    for char in letters.upper():
-        value = (value * 26) + (ord(char) - 64)
-    return value
+    """Convert a column letter string (e.g. ``"AB"``) to a 1-based column index.
 
+    Uses :func:`functools.reduce` for a concise, loop-free implementation.
+    Each character contributes its 1-based alphabetic position (A=1 … Z=26),
+    so ``ord(c) - 64`` maps ``'A'`` → 1, ``'B'`` → 2, …, ``'Z'`` → 26.
+    """
+    return reduce(lambda acc, c: acc * 26 + (ord(c) - 64), letters.upper(), 0)
 
 
 def _column_letters(index: int) -> str:
@@ -187,7 +202,6 @@ def _column_letters(index: int) -> str:
         index, remainder = divmod(index - 1, 26)
         letters = chr(65 + remainder) + letters
     return letters
-
 
 
 def _collect_fill_styles(workbook: WorkbookData) -> dict[str, int]:
@@ -201,7 +215,6 @@ def _collect_fill_styles(workbook: WorkbookData) -> dict[str, int]:
     return fills
 
 
-
 def _render_content_types(workbook: WorkbookData) -> bytes:
     root = ET.Element(f"{{{CONTENT_NS}}}Types")
     ET.SubElement(root, f"{{{CONTENT_NS}}}Default", Extension="rels", ContentType="application/vnd.openxmlformats-package.relationships+xml")
@@ -213,12 +226,10 @@ def _render_content_types(workbook: WorkbookData) -> bytes:
     return ET.tostring(root, encoding="utf-8", xml_declaration=True)
 
 
-
 def _render_root_relationships() -> bytes:
     root = ET.Element(f"{{{PKG_REL_NS}}}Relationships")
     ET.SubElement(root, f"{{{PKG_REL_NS}}}Relationship", Id="rId1", Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument", Target="xl/workbook.xml")
     return ET.tostring(root, encoding="utf-8", xml_declaration=True)
-
 
 
 def _render_workbook(workbook: WorkbookData) -> bytes:
@@ -230,14 +241,12 @@ def _render_workbook(workbook: WorkbookData) -> bytes:
     return ET.tostring(root, encoding="utf-8", xml_declaration=True)
 
 
-
 def _render_workbook_relationships(workbook: WorkbookData) -> bytes:
     root = ET.Element(f"{{{PKG_REL_NS}}}Relationships")
     for idx, _sheet in enumerate(workbook.sheets, start=1):
         ET.SubElement(root, f"{{{PKG_REL_NS}}}Relationship", Id=f"rId{idx}", Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet", Target=f"worksheets/sheet{idx}.xml")
     ET.SubElement(root, f"{{{PKG_REL_NS}}}Relationship", Id=f"rId{len(workbook.sheets) + 1}", Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles", Target="styles.xml")
     return ET.tostring(root, encoding="utf-8", xml_declaration=True)
-
 
 
 def _render_styles(fill_styles: dict[str, int]) -> bytes:
@@ -270,7 +279,6 @@ def _render_styles(fill_styles: dict[str, int]) -> bytes:
     cell_styles = ET.SubElement(root, f"{{{MAIN_NS}}}cellStyles", count="1")
     ET.SubElement(cell_styles, f"{{{MAIN_NS}}}cellStyle", name="Normal", xfId="0", builtinId="0")
     return ET.tostring(root, encoding="utf-8", xml_declaration=True)
-
 
 
 def _render_sheet(sheet: SheetData, fill_styles: dict[str, int]) -> bytes:

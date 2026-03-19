@@ -17,6 +17,12 @@ EXTRACTED_PAGES_RE = re.compile(r"^extracted_pages_(?P<year>\d{4})_\d{2}$", re.I
 SUFFIXES = ("sup", "prod", "rend", "imp", "exp", "num")
 _MULTI_UNDERSCORE_RE = re.compile(r"_+")
 
+# Single regex that strips one known suffix (with optional leading underscore) from the end.
+# Applied repeatedly until stable to handle chained suffixes like "arrozimp_exp".
+_SUFFIX_RE = re.compile(
+    r"_?(?:" + "|".join(re.escape(s) for s in SUFFIXES) + r")$",
+    re.IGNORECASE,
+)
 
 
 def sanitize_name(name: str) -> str:
@@ -35,6 +41,11 @@ DEFAULT_PRODUCT_TRANSLATIONS: dict[str, str] = {}
 
 @lru_cache(maxsize=512)
 def _auto_translate_product(raw_product: str) -> str:
+    """Translate *raw_product* to English via deep_translator then MyMemory as fallback.
+
+    Results are cached with :func:`functools.lru_cache` so repeated calls for
+    the same product hit the cache instead of making network requests.
+    """
     normalized_product = normalize_text(raw_product)
     if not normalized_product:
         return ""
@@ -72,23 +83,27 @@ def _translate_with_mymemory(normalized_product: str) -> str:
 
 
 def strip_known_suffixes(raw_product: str) -> str:
+    """Strip trailing agricultural-trade suffixes (e.g. ``_imp``, ``_exp``) from *raw_product*.
+
+    The regex is applied repeatedly until no further suffix can be removed,
+    which handles chained suffixes such as ``"arrozimp_exp"`` in one call.
+    """
     cleaned = raw_product.strip("_")
-    changed = True
-    while cleaned and changed:
-        changed = False
-        for suffix in SUFFIXES:
-            if cleaned.endswith(f"_{suffix}"):
-                cleaned = cleaned[: -len(suffix) - 1].rstrip("_")
-                changed = True
-                break
-            if cleaned.endswith(suffix):
-                cleaned = cleaned[: -len(suffix)].rstrip("_")
-                changed = True
-                break
-    return cleaned.strip("_")
+    while True:
+        stripped = _SUFFIX_RE.sub("", cleaned).strip("_")
+        if stripped == cleaned:
+            break
+        cleaned = stripped
+    return cleaned
 
 
 def translate_product_name(raw_product: str, product_translations: dict[str, str] | None = None) -> str:
+    """Return the English translation of *raw_product*.
+
+    Looks up the merged table of :data:`DEFAULT_PRODUCT_TRANSLATIONS` and the
+    caller-supplied *product_translations* mapping; falls back to
+    :func:`_auto_translate_product` when no manual entry is found.
+    """
     normalized_product = normalize_text(raw_product)
     translations = {
         **DEFAULT_PRODUCT_TRANSLATIONS,
@@ -98,6 +113,11 @@ def translate_product_name(raw_product: str, product_translations: dict[str, str
 
 
 def extract_source_product(document_path: str | Path) -> str:
+    """Derive the product name embedded in a source Excel filename.
+
+    Handles both ``reviewed_START_END<body>`` filenames and plain
+    ``YYYY_product`` filenames.
+    """
     stem = Path(document_path).stem
     match = REVIEWED_RE.match(stem)
     if match:
@@ -117,12 +137,16 @@ def extract_source_product(document_path: str | Path) -> str:
     return normalize_text(" ".join(product_tokens))
 
 
-
 def canonical_document_name(
     document_path: str | Path,
     product_translations: dict[str, str] | None = None,
     product_aliases: dict[str, str] | None = None,
 ) -> str:
+    """Compute a stable, human-readable canonical name for a source workbook.
+
+    Returns a lowercase slug of the form
+    ``r_iia_{yearbook}_{year}_{start}_{end}_{english_product}``.
+    """
     path = Path(document_path)
     stem = path.stem
     if stem.startswith("r_") and not stem.startswith(REVIEWED_PREFIX):
@@ -145,8 +169,12 @@ def canonical_document_name(
     return sanitize_name(raw)
 
 
-
 def infer_yearbook_metadata(document_path: str | Path) -> dict[str, str]:
+    """Infer ``agency``, ``yearbook``, and ``year`` from the directory structure of *document_path*.
+
+    Looks for an ``extracted_pages_YYYY_YY`` segment in the path; uses the
+    folder directly above it as the yearbook name.
+    """
     path = Path(document_path)
     yearbook = "unknown"
     year = "unknown"
