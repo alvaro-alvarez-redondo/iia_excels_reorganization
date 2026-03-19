@@ -1,3 +1,5 @@
+"""Command-line workflow for reorganizing historical Excel workbooks."""
+
 from __future__ import annotations
 
 import argparse
@@ -5,15 +7,21 @@ import re
 import shutil
 import sys
 from pathlib import Path
-from typing import Callable
+from typing import Callable, TypeAlias
 
 from .config import load_config
-from .utils.naming import sanitize_name
 from .core.transformer import GeographyIndex, ProductIndex, transform_workbook
+from .utils.naming import sanitize_name
 from .utils.text import derive_product_from_document
 
-_EXTRACTED_PAGES_RE = re.compile(r"^extracted_pages_(?P<year>\d{4})_\d{2}$", re.IGNORECASE)
-_EXCEL_PATTERNS = ("*.xlsx", "*.xlsm")
+WorkbookEntry: TypeAlias = tuple[Path, Path]
+WorkbookAction: TypeAlias = Callable[[WorkbookEntry], None]
+
+_EXTRACTED_PAGES_RE = re.compile(
+    r"^extracted_pages_(?P<year>\d{4})_\d{2}$",
+    re.IGNORECASE,
+)
+_EXCEL_SUFFIXES = frozenset({".xlsx", ".xlsm"})
 DEFAULT_INPUT_DIR = Path("data/raw_inputs")
 DEFAULT_OUTPUT_DIR = Path("data/10-raw_imports")
 GEOGRAPHY_INDEX_FILENAME = "unique_geography_values.txt"
@@ -25,98 +33,88 @@ LISTS_DIR = PROJECT_ROOT / "data" / "lists"
 def build_parser() -> argparse.ArgumentParser:
     """Build and return the CLI argument parser."""
     parser = argparse.ArgumentParser(
-        description="Reorganize historical Excel workbooks into a standardized structure.",
+        description=(
+            "Reorganize historical Excel workbooks into a standardized structure."
+        ),
     )
     parser.add_argument(
         "input",
         nargs="?",
-        default="data/raw_inputs",
-        help="Excel workbook file or directory containing workbook files. "
-             "Defaults to the 'data/raw_inputs/' folder in the current directory. "
-             "Quote the path when it contains spaces: \"data/raw_inputs\".",
+        default=str(DEFAULT_INPUT_DIR),
+        help=(
+            "Excel workbook file or directory containing workbook files. "
+            "Defaults to the 'data/raw_inputs/' folder in the current directory. "
+            'Quote the path when it contains spaces: "data/raw_inputs".'
+        ),
     )
     parser.add_argument(
         "output_dir",
         nargs="?",
-        default="data/10-raw_imports",
-        help="Directory where transformed workbooks will be written. "
-             "Defaults to '10-raw_imports/' in the current directory.",
+        default=str(DEFAULT_OUTPUT_DIR),
+        help=(
+            "Directory where transformed workbooks will be written. "
+            "Defaults to '10-raw_imports/' in the current directory."
+        ),
     )
     parser.add_argument(
         "--config",
-        help="Path to YAML configuration for categories, aliases, filters, and unit overrides.",
+        help=(
+            "Path to YAML configuration for categories, aliases, filters, "
+            "and unit overrides."
+        ),
     )
     return parser
 
 
 def _compute_output_subdir(workbook_path: Path) -> Path:
-    """Return the relative output subdirectory for *workbook_path*.
-
-    When the path contains a directory matching ``extracted_pages_YYYY_YY`` the
-    output hierarchy is built as::
-
-        iia_extracted_pages_YYYY/
-        └── iia_{subfolder}_YYYY/
-
-    The subfolder is determined in this order:
-
-    1. If a directory sits **between** ``extracted_pages_*`` and the workbook
-       file, its name is used (e.g. ``extracted_pages_*/crops/file.xlsx``
-       → ``iia_crops_YYYY``).
-    2. Otherwise the directory that sits **directly above**
-       ``extracted_pages_*`` is used (e.g. ``trade/extracted_pages_*/file.xlsx``
-       → ``iia_trade_YYYY``).  This handles the common structure where the
-       yearbook topic folder wraps the year directory.
-
-    If no ``extracted_pages_*`` segment is found the file is placed directly in
-    the output root (relative path ``Path(".")``).
-    """
+    """Return the relative output subdirectory for *workbook_path*."""
     parts = workbook_path.parts
     for idx, part in enumerate(parts):
         match = _EXTRACTED_PAGES_RE.match(part)
-        if match:
-            year = match.group("year")
-            parent_dir = f"iia_extracted_pages_{year}"
-            # Priority 1: a subfolder between extracted_pages_* and the file
-            intermediate = parts[idx + 1 : -1]
-            if intermediate:
-                child_dir = sanitize_name(f"iia_{intermediate[0]}_{year}")
-                return Path(parent_dir) / child_dir
-            # Priority 2: the folder directly above extracted_pages_*
-            if idx > 0:
-                topic = parts[idx - 1]
-                child_dir = sanitize_name(f"iia_{topic}_{year}")
-                return Path(parent_dir) / child_dir
-            return Path(parent_dir)
+        if match is None:
+            continue
+
+        year = match.group("year")
+        parent_dir = Path(f"iia_extracted_pages_{year}")
+        intermediate = parts[idx + 1 : -1]
+        if intermediate:
+            child_dir = sanitize_name(f"iia_{intermediate[0]}_{year}")
+            return parent_dir / child_dir
+        if idx > 0:
+            topic = parts[idx - 1]
+            child_dir = sanitize_name(f"iia_{topic}_{year}")
+            return parent_dir / child_dir
+        return parent_dir
     return Path(".")
 
 
 def _iter_workbooks(path: Path) -> list[Path]:
-    """Return Excel workbooks under *path* (non-recursive flat scan)."""
+    """Return Excel workbooks under *path* using a non-recursive scan."""
     if path.is_file():
         return [path]
-    workbooks: list[Path] = []
-    for pattern in _EXCEL_PATTERNS:
-        workbooks.extend(sorted(path.glob(pattern)))
-    return workbooks
+
+    return sorted(
+        candidate
+        for candidate in path.iterdir()
+        if candidate.is_file() and candidate.suffix.lower() in _EXCEL_SUFFIXES
+    )
 
 
-def _iter_workbooks_structured(root: Path) -> list[tuple[Path, Path]]:
-    """Walk *root* recursively and return ``(workbook_path, output_subdir)`` pairs.
-
-    The output subdirectory for each workbook is derived from the
-    ``extracted_pages_YYYY_YY`` directory structure when present; otherwise the
-    workbook is placed directly under the output root.
-    """
-    entries: list[tuple[Path, Path]] = []
-    for pattern in _EXCEL_PATTERNS:
-        for wb_path in sorted(root.rglob(pattern)):
-            entries.append((wb_path, _compute_output_subdir(wb_path)))
-    return entries
+def _iter_workbooks_structured(root: Path) -> list[WorkbookEntry]:
+    """Walk *root* recursively and return ``(workbook_path, output_subdir)`` pairs."""
+    workbook_paths = sorted(
+        candidate
+        for candidate in root.rglob("*")
+        if candidate.is_file() and candidate.suffix.lower() in _EXCEL_SUFFIXES
+    )
+    return [
+        (workbook_path, _compute_output_subdir(workbook_path))
+        for workbook_path in workbook_paths
+    ]
 
 
 def _ensure_workspace(input_path: Path, output_root: Path) -> None:
-    """Create the default workflow folders when they do not exist yet."""
+    """Create or reset the input/output workspace directories."""
     if not input_path.exists() and input_path.suffix == "":
         input_path.mkdir(parents=True, exist_ok=True)
     if output_root.exists():
@@ -125,18 +123,26 @@ def _ensure_workspace(input_path: Path, output_root: Path) -> None:
     LISTS_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def _render_progress_bar(label: str, current: int, total: int, width: int = 24) -> str:
-    """Return a single-line progress bar string suitable for ``sys.stdout.write``."""
-    if total <= 0:
-        total = 1
-    completed = min(width, int(width * current / total))
-    percent = int(100 * current / total)
+def _render_progress_bar(
+    label: str,
+    current: int,
+    total: int,
+    width: int = 24,
+) -> str:
+    """Return a single-line progress bar string."""
+    normalized_total = max(total, 1)
+    completed = min(width, int(width * current / normalized_total))
+    percent = int(100 * current / normalized_total)
     bar = "█" * completed + "·" * (width - completed)
-    return f"{label:<21} │{bar}│ {percent:>3}% ({current}/{total})"
+    return f"{label:<21} │{bar}│ {percent:>3}% ({current}/{normalized_total})"
 
 
-def _run_progress(label: str, items: list[tuple[Path, Path]], action: Callable[[tuple[Path, Path]], None]) -> None:
-    """Run *action* on each item in *items* while printing an updating progress bar."""
+def _run_progress(
+    label: str,
+    items: list[WorkbookEntry],
+    action: WorkbookAction,
+) -> None:
+    """Run *action* on each item in *items* while updating a progress bar."""
     total = len(items)
     sys.stdout.write(_render_progress_bar(label, 0, total))
     sys.stdout.flush()
@@ -158,34 +164,40 @@ def main() -> None:
     config = load_config(args.config)
 
     if input_path.is_file():
-        workbook_entries: list[tuple[Path, Path]] = [(input_path, Path("."))]
+        workbook_entries: list[WorkbookEntry] = [(input_path, Path("."))]
     else:
         workbook_entries = _iter_workbooks_structured(input_path)
         if not workbook_entries:
-            flat = _iter_workbooks(input_path)
-            workbook_entries = [(wb, Path(".")) for wb in flat]
+            workbook_entries = [(path, Path(".")) for path in _iter_workbooks(input_path)]
 
     if not workbook_entries:
         print(f"No Excel workbooks found in: {input_path}")
-        print(f"Created workspace folders if needed. Add source Excel files there and run again.")
+        print(
+            "Created workspace folders if needed. Add source Excel files there "
+            "and run again."
+        )
         return
 
     geography_index = GeographyIndex()
     product_index = ProductIndex()
 
-    def prepare_output(entry: tuple[Path, Path]) -> None:
-        """Create the output subdirectory for *entry* if it does not yet exist."""
-        _workbook, output_subdir = entry
-        output_dir = output_root / output_subdir
-        output_dir.mkdir(parents=True, exist_ok=True)
+    def prepare_output(entry: WorkbookEntry) -> None:
+        """Create the output subdirectory for *entry* if needed."""
+        _, output_subdir = entry
+        (output_root / output_subdir).mkdir(parents=True, exist_ok=True)
 
-    def transform_entry(entry: tuple[Path, Path]) -> None:
-        """Transform a single workbook and write the result to the output directory."""
-        workbook, output_subdir = entry
+    def transform_entry(entry: WorkbookEntry) -> None:
+        """Transform a single workbook and write it into the output tree."""
+        workbook_path, output_subdir = entry
         output_dir = output_root / output_subdir
-        output_name = f"{sanitize_name(config.canonical_name_for_document(workbook))}.xlsx"
+        output_name = f"{sanitize_name(config.canonical_name_for_document(workbook_path))}.xlsx"
         output_path = output_dir / output_name
-        transform_workbook(workbook, output_path, config=config, geography_index=geography_index)
+        transform_workbook(
+            workbook_path,
+            output_path,
+            config=config,
+            geography_index=geography_index,
+        )
         product_index.add_product(derive_product_from_document(output_path.name))
 
     _run_progress("Reorganizing folders", workbook_entries, prepare_output)

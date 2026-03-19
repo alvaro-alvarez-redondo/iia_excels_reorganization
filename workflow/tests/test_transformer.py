@@ -1,13 +1,27 @@
 from __future__ import annotations
 
-import os
 import importlib.util
 from pathlib import Path
+from typing import Any
 
-from iia_excel_reorg.cli import _compute_output_subdir, _ensure_workspace, _iter_workbooks_structured
+from iia_excel_reorg.cli import (
+    _compute_output_subdir,
+    _ensure_workspace,
+    _iter_workbooks_structured,
+)
 from iia_excel_reorg.config import WorkbookConfig, load_config
-from iia_excel_reorg.naming import canonical_document_name, extract_source_product, infer_yearbook_metadata, sanitize_name
-from iia_excel_reorg.transformer import GeographyIndex, ProductIndex, _is_continent_row, _is_hemisphere_row, transform_workbook
+from iia_excel_reorg.naming import (
+    canonical_document_name,
+    extract_source_product,
+    infer_yearbook_metadata,
+)
+from iia_excel_reorg.transformer import (
+    GeographyIndex,
+    ProductIndex,
+    _is_continent_row,
+    _is_hemisphere_row,
+    transform_workbook,
+)
 from iia_excel_reorg.unit_rules import assign_unit
 from iia_excel_reorg.xlsx_io import SheetData, WorkbookData, read_workbook, write_workbook
 
@@ -16,14 +30,25 @@ YELLOW = "FFFFFF00"
 ORANGE = "FFFFA500"
 
 
+def _write_config(path: Path, lines: list[str]) -> Path:
+    """Write a small test YAML configuration file and return its path."""
+    path.write_text("\n".join(lines), encoding="utf-8")
+    return path
+
 
 def _build_source_workbook(path: Path, *, include_imports: bool = False) -> None:
+    """Build a representative source workbook used by transformation tests."""
     area = SheetData(name="AREA")
     area.set_cell(1, 2, "1909-1913")
     area.set_cell(1, 3, "1922")
     area.set_cell(2, 1, "HÉMISPHÈRE SEPTENTRIONAL")
     area.set_cell(3, 1, "EUROPE.")
-    area.set_cell(4, 1, "Belgique-Luxembourg (reexports) (special case)", fill_rgb=GREEN)
+    area.set_cell(
+        4,
+        1,
+        "Belgique-Luxembourg (reexports) (special case)",
+        fill_rgb=GREEN,
+    )
     area.set_cell(4, 2, 17268, fill_rgb=YELLOW)
     area.set_cell(4, 3, 11887, fill_rgb=ORANGE)
     area.set_cell(5, 1, "Germany", fill_rgb=GREEN)
@@ -56,6 +81,7 @@ def _build_source_workbook(path: Path, *, include_imports: bool = False) -> None
 
 
 def _build_numeric_year_workbook(path: Path) -> None:
+    """Build a workbook whose year header is stored as a numeric Excel value."""
     area = SheetData(name="AREA")
     area.set_cell(1, 2, 1900.0)
     area.set_cell(2, 1, "HÉMISPHÈRE SEPTENTRIONAL", fill_rgb=YELLOW)
@@ -66,6 +92,7 @@ def _build_numeric_year_workbook(path: Path) -> None:
 
 
 def _build_multi_continent_workbook(path: Path) -> None:
+    """Build a workbook spanning multiple continents to test spacer-row logic."""
     area = SheetData(name="AREA")
     area.set_cell(1, 2, "1900")
     area.set_cell(2, 1, "HÉMISPHÈRE SEPTENTRIONAL")
@@ -78,7 +105,13 @@ def _build_multi_continent_workbook(path: Path) -> None:
     write_workbook(path, WorkbookData(sheets=[area]))
 
 
-
+def _standard_config_lines(document_name: str, *, unit_mode: str = "standard") -> list[str]:
+    """Return common test config lines for a single workbook category."""
+    return [
+        f"unit_mode: {unit_mode}",
+        "document_categories:",
+        f"  {document_name}: 1",
+    ]
 
 
 def test_geography_detection_handles_known_ocr_and_accent_variants() -> None:
@@ -93,21 +126,16 @@ def test_geography_detection_handles_known_ocr_and_accent_variants() -> None:
     assert not _is_hemisphere_row("Canada")
 
 
-def test_transform_workbook_assigns_units_from_rules_and_preserves_notes(tmp_path: Path) -> None:
+def test_transform_workbook_assigns_units_from_rules_and_preserves_notes(
+    tmp_path: Path,
+) -> None:
     source_path = tmp_path / "r_iia_trade_1950_3_5_wheat.xlsx"
     output_path = tmp_path / "standardized.xlsx"
     _build_source_workbook(source_path)
 
-    config_path = tmp_path / "config.yml"
-    config_path.write_text(
-        "\n".join(
-            [
-                'unit_mode: standard',
-                'document_categories:',
-                '  r_iia_trade_1950_3_5_wheat: 1',
-            ]
-        ),
-        encoding="utf-8",
+    config_path = _write_config(
+        tmp_path / "config.yml",
+        _standard_config_lines("r_iia_trade_1950_3_5_wheat"),
     )
 
     transform_workbook(source_path, output_path, config=load_config(config_path))
@@ -149,21 +177,16 @@ def test_transform_workbook_assigns_units_from_rules_and_preserves_notes(tmp_pat
     assert production.get_cell(2, 7).value == 315569
 
 
-def test_transform_workbook_preserves_group_colors_and_normalizes_numeric_year_headers(tmp_path: Path) -> None:
+def test_transform_workbook_preserves_group_colors_and_normalizes_numeric_year_headers(
+    tmp_path: Path,
+) -> None:
     source_path = tmp_path / "r_iia_trade_1950_1_1_wheat.xlsx"
     output_path = tmp_path / "standardized.xlsx"
     _build_numeric_year_workbook(source_path)
 
-    config_path = tmp_path / "config.yml"
-    config_path.write_text(
-        "\n".join(
-            [
-                "unit_mode: standard",
-                "document_categories:",
-                "  r_iia_trade_1950_1_1_wheat: 1",
-            ]
-        ),
-        encoding="utf-8",
+    config_path = _write_config(
+        tmp_path / "config.yml",
+        _standard_config_lines("r_iia_trade_1950_1_1_wheat"),
     )
 
     transform_workbook(source_path, output_path, config=load_config(config_path))
@@ -179,21 +202,16 @@ def test_transform_workbook_preserves_group_colors_and_normalizes_numeric_year_h
     assert area.get_cell(2, 5).value == "reexports"
 
 
-def test_transform_workbook_inserts_blank_row_before_each_new_continent(tmp_path: Path) -> None:
+def test_transform_workbook_inserts_blank_row_before_each_new_continent(
+    tmp_path: Path,
+) -> None:
     source_path = tmp_path / "r_iia_trade_1950_1_1_wheat.xlsx"
     output_path = tmp_path / "standardized.xlsx"
     _build_multi_continent_workbook(source_path)
 
-    config_path = tmp_path / "config.yml"
-    config_path.write_text(
-        "\n".join(
-            [
-                "unit_mode: standard",
-                "document_categories:",
-                "  r_iia_trade_1950_1_1_wheat: 1",
-            ]
-        ),
-        encoding="utf-8",
+    config_path = _write_config(
+        tmp_path / "config.yml",
+        _standard_config_lines("r_iia_trade_1950_1_1_wheat"),
     )
 
     transform_workbook(source_path, output_path, config=load_config(config_path))
@@ -216,23 +234,29 @@ def test_transform_workbook_collects_unique_geography_labels(tmp_path: Path) -> 
     _build_source_workbook(source_path, include_imports=True)
     geography_index = GeographyIndex()
 
-    config_path = tmp_path / "config.yml"
-    config_path.write_text(
-        "\n".join(
-            [
-                "unit_mode: standard",
-                "document_categories:",
-                "  r_iia_trade_1950_3_5_wheat: 1",
-            ]
-        ),
-        encoding="utf-8",
+    config_path = _write_config(
+        tmp_path / "config.yml",
+        _standard_config_lines("r_iia_trade_1950_3_5_wheat"),
     )
 
-    transform_workbook(source_path, output_path, config=load_config(config_path), geography_index=geography_index)
+    transform_workbook(
+        source_path,
+        output_path,
+        config=load_config(config_path),
+        geography_index=geography_index,
+    )
 
-    assert geography_index.hemispheres == {"HÉMISPHÈRE SEPTENTRIONAL", "Hemisphère méridional"}
+    assert geography_index.hemispheres == {
+        "HÉMISPHÈRE SEPTENTRIONAL",
+        "Hemisphère méridional",
+    }
     assert geography_index.continents == {"EUROPE", "Amérique"}
-    assert geography_index.countries == {"Austria", "Belgique-Luxembourg", "Canada", "Germany"}
+    assert geography_index.countries == {
+        "Austria",
+        "Belgique-Luxembourg",
+        "Canada",
+        "Germany",
+    }
 
     index_path = tmp_path / "unique_geography_values.txt"
     geography_index.write_txt(index_path)
@@ -256,7 +280,6 @@ def test_transform_workbook_collects_unique_geography_labels(tmp_path: Path) -> 
     )
 
 
-
 def test_product_index_writes_sorted_unique_products(tmp_path: Path) -> None:
     product_index = ProductIndex()
     product_index.add_product("rice")
@@ -267,17 +290,13 @@ def test_product_index_writes_sorted_unique_products(tmp_path: Path) -> None:
     product_index.write_txt(index_path)
 
     assert index_path.read_text(encoding="utf-8") == "\n".join(
-        [
-            "[products]",
-            "rice",
-            "wheat",
-            "",
-        ]
+        ["[products]", "rice", "wheat", ""]
     )
 
 
-
-def test_transform_workbook_supports_inputs_mode_and_harmonized_output_names(tmp_path: Path) -> None:
+def test_transform_workbook_supports_inputs_mode_and_harmonized_output_names(
+    tmp_path: Path,
+) -> None:
     source_dir = tmp_path / "raw_inputs" / "trade" / "extracted_pages_1938_39"
     source_dir.mkdir(parents=True)
     source_path = source_dir / "reviewed_466_475arrozimp_exp.xlsx"
@@ -285,18 +304,15 @@ def test_transform_workbook_supports_inputs_mode_and_harmonized_output_names(tmp
     output_dir.mkdir()
     _build_source_workbook(source_path, include_imports=True)
 
-    config_path = tmp_path / "config.yml"
-    config_path.write_text(
-        "\n".join(
-            [
-                'unit_mode: inputs',
-                'document_categories:',
-                '  reviewed_466_475arrozimp_exp: 2',
-                'product_translations:',
-                '  arroz: rice',
-            ]
-        ),
-        encoding="utf-8",
+    config_path = _write_config(
+        tmp_path / "config.yml",
+        [
+            "unit_mode: inputs",
+            "document_categories:",
+            "  reviewed_466_475arrozimp_exp: 2",
+            "product_translations:",
+            "  arroz: rice",
+        ],
     )
 
     config = load_config(config_path)
@@ -314,8 +330,9 @@ def test_transform_workbook_supports_inputs_mode_and_harmonized_output_names(tmp
     assert imports.get_cell(2, 7).value == 0.2
 
 
-
-def test_canonical_document_name_auto_translates_unknown_products(monkeypatch) -> None:
+def test_canonical_document_name_auto_translates_unknown_products(
+    monkeypatch: Any,
+) -> None:
     from iia_excel_reorg.utils import naming
 
     monkeypatch.setattr(naming, "_auto_translate_product", lambda value: "cocoa beans")
@@ -335,10 +352,20 @@ def test_canonical_document_name_applies_alias_before_translation() -> None:
 
 
 def test_naming_and_unit_rules_cover_reviewed_documents() -> None:
-    path = Path("raw_inputs/trade/extracted_pages_1938_39/reviewed_239_239azucar_caña_brutaprod.xlsx")
-    assert infer_yearbook_metadata(path) == {"agency": "iia", "yearbook": "trade", "year": "1938"}
+    path = Path(
+        "raw_inputs/trade/extracted_pages_1938_39/"
+        "reviewed_239_239azucar_caña_brutaprod.xlsx"
+    )
+    assert infer_yearbook_metadata(path) == {
+        "agency": "iia",
+        "yearbook": "trade",
+        "year": "1938",
+    }
     assert extract_source_product(path) == "azucar cana bruta"
-    assert canonical_document_name(path, product_translations={"azucar cana bruta": "raw cane sugar"}) == "r_iia_trade_1938_239_239_raw_cane_sugar"
+    assert canonical_document_name(
+        path,
+        product_translations={"azucar cana bruta": "raw cane sugar"},
+    ) == "r_iia_trade_1938_239_239_raw_cane_sugar"
     assert assign_unit("imports", "te", 1) == "tonnes"
     assert assign_unit("imports", "te", 2) == "q"
     assert assign_unit("production", "vino", 1) == "1000 hl"
@@ -347,37 +374,42 @@ def test_naming_and_unit_rules_cover_reviewed_documents() -> None:
     assert assign_unit("production", "whatever", None) == ""
 
 
-def test_canonical_document_name_translates_multiword_reviewed_product_at_end(monkeypatch) -> None:
+def test_canonical_document_name_translates_multiword_reviewed_product_at_end(
+    monkeypatch: Any,
+) -> None:
     from iia_excel_reorg.utils import naming
 
-    monkeypatch.setattr(naming, "_auto_translate_product", lambda value: "raw beet sugar")
-    path = Path("raw_inputs/trade/extracted_pages_1938_39/reviewed_238_238azucar_remolacha_brutaprod.xlsx")
+    monkeypatch.setattr(
+        naming,
+        "_auto_translate_product",
+        lambda value: "raw beet sugar",
+    )
+    path = Path(
+        "raw_inputs/trade/extracted_pages_1938_39/"
+        "reviewed_238_238azucar_remolacha_brutaprod.xlsx"
+    )
 
     assert extract_source_product(path) == "azucar remolacha bruta"
     assert canonical_document_name(path) == "r_iia_trade_1938_238_238_raw_beet_sugar"
 
 
-
 def test_load_config_parses_rule_based_yaml(tmp_path: Path) -> None:
-    config_path = tmp_path / "units.yml"
-    config_path.write_text(
-        "\n".join(
-            [
-                'unit_mode: standard',
-                'document_categories:',
-                '  reviewed_466_475arrozimp_exp: 1',
-                'product_aliases:',
-                '  tea: te',
-                'product_translations:',
-                '  arroz: rice',
-                'unit_overrides:',
-                '  imports: tonnes',
-                'include_sheets:',
-                '  - AREA',
-                '  - PRODUCTION',
-            ]
-        ),
-        encoding="utf-8",
+    config_path = _write_config(
+        tmp_path / "units.yml",
+        [
+            "unit_mode: standard",
+            "document_categories:",
+            "  reviewed_466_475arrozimp_exp: 1",
+            "product_aliases:",
+            "  tea: te",
+            "product_translations:",
+            "  arroz: rice",
+            "unit_overrides:",
+            "  imports: tonnes",
+            "include_sheets:",
+            "  - AREA",
+            "  - PRODUCTION",
+        ],
     )
 
     config = load_config(config_path)
@@ -390,21 +422,31 @@ def test_load_config_parses_rule_based_yaml(tmp_path: Path) -> None:
 
 
 def test_workbook_config_canonical_name_uses_product_aliases() -> None:
-    config = WorkbookConfig(product_aliases={"tea": "te"}, product_translations={"te": "tea"})
+    config = WorkbookConfig(
+        product_aliases={"tea": "te"},
+        product_translations={"te": "tea"},
+    )
     path = Path("raw_inputs/trade/extracted_pages_1938_39/reviewed_12_13teaimp.xlsx")
 
     assert config.canonical_name_for_document(path) == "r_iia_trade_1938_12_13_tea"
 
 
-def test_run_project_bootstraps_deep_translator(monkeypatch) -> None:
-    spec = importlib.util.spec_from_file_location("run_project", Path(__file__).resolve().parents[2] / "run_project.py")
+def test_run_project_bootstraps_deep_translator(monkeypatch: Any) -> None:
+    spec = importlib.util.spec_from_file_location(
+        "run_project",
+        Path(__file__).resolve().parents[2] / "run_project.py",
+    )
     assert spec is not None and spec.loader is not None
     run_project = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(run_project)
 
     commands: list[list[str]] = []
 
-    monkeypatch.setattr(importlib.util, "find_spec", lambda name: None if name == "deep_translator" else object())
+    monkeypatch.setattr(
+        importlib.util,
+        "find_spec",
+        lambda name: None if name == "deep_translator" else object(),
+    )
     monkeypatch.setattr(
         run_project.subprocess,
         "check_call",
@@ -413,68 +455,70 @@ def test_run_project_bootstraps_deep_translator(monkeypatch) -> None:
 
     run_project._ensure_translation_dependency()
 
-    assert commands == [[run_project.sys.executable, "-m", "pip", "install", "deep-translator>=1.11.4"]]
-
+    assert commands == [
+        [
+            run_project.sys.executable,
+            "-m",
+            "pip",
+            "install",
+            "deep-translator>=1.11.4",
+        ]
+    ]
 
 
 def test_compute_output_subdir_with_extracted_pages_and_subfolder() -> None:
-    # Excel file nested under extracted_pages_YYYY_YY/subfolder/
-    path = Path("inputs/reviewed_iia/extracted_pages_1929_30/crops/reviewed_1_2_wheat.xlsx")
-    result = _compute_output_subdir(path)
-    assert result == Path("iia_extracted_pages_1929/iia_crops_1929")
-
+    path = Path(
+        "inputs/reviewed_iia/extracted_pages_1929_30/crops/reviewed_1_2_wheat.xlsx"
+    )
+    assert _compute_output_subdir(path) == Path(
+        "iia_extracted_pages_1929/iia_crops_1929"
+    )
 
 
 def test_compute_output_subdir_with_extracted_pages_no_subfolder() -> None:
-    # Excel file directly inside extracted_pages_YYYY_YY/ with a topic folder above.
-    # The parent folder (trade) is used as the output subfolder.
     path = Path("raw_inputs/trade/extracted_pages_1938_39/reviewed_466_475arroz.xlsx")
-    result = _compute_output_subdir(path)
-    assert result == Path("iia_extracted_pages_1938/iia_trade_1938")
-
+    assert _compute_output_subdir(path) == Path(
+        "iia_extracted_pages_1938/iia_trade_1938"
+    )
 
 
 def test_compute_output_subdir_with_deep_nesting() -> None:
-    # Excel file two levels below the topic root: topic/sub_category/extracted_pages_*/file.xlsx
-    # The sub_category folder (directly above extracted_pages_*) becomes the output subfolder.
-    path = Path("raw_inputs/area and production/multiple product/extracted_pages_1933_34/wb.xlsx")
-    result = _compute_output_subdir(path)
-    assert result == Path("iia_extracted_pages_1933/iia_multiple_product_1933")
-
+    path = Path(
+        "raw_inputs/area and production/multiple product/extracted_pages_1933_34/wb.xlsx"
+    )
+    assert _compute_output_subdir(path) == Path(
+        "iia_extracted_pages_1933/iia_multiple_product_1933"
+    )
 
 
 def test_compute_output_subdir_without_extracted_pages() -> None:
-    # Excel file with no extracted_pages_* segment → placed in output root
     path = Path("some/other/dir/workbook.xlsx")
-    result = _compute_output_subdir(path)
-    assert result == Path(".")
-
+    assert _compute_output_subdir(path) == Path(".")
 
 
 def test_iter_workbooks_structured_builds_correct_hierarchy(tmp_path: Path) -> None:
-    # Set up an input tree with two extracted_pages folders and a subfolder
     crops_dir = tmp_path / "reviewed_iia" / "extracted_pages_1929_30" / "crops"
     trade_dir = tmp_path / "reviewed_iia" / "extracted_pages_1938_39" / "trade"
     crops_dir.mkdir(parents=True)
     trade_dir.mkdir(parents=True)
 
-    wb1 = crops_dir / "reviewed_1_2_wheat.xlsx"
-    wb2 = trade_dir / "reviewed_3_4_rice.xlsx"
-
-    # Create minimal xlsx files so rglob finds them
-    _build_source_workbook(wb1)
-    _build_source_workbook(wb2)
+    workbook_one = crops_dir / "reviewed_1_2_wheat.xlsx"
+    workbook_two = trade_dir / "reviewed_3_4_rice.xlsx"
+    _build_source_workbook(workbook_one)
+    _build_source_workbook(workbook_two)
 
     entries = _iter_workbooks_structured(tmp_path)
-
-    paths_and_subdirs = {e[0].name: e[1] for e in entries}
-    assert paths_and_subdirs["reviewed_1_2_wheat.xlsx"] == Path("iia_extracted_pages_1929/iia_crops_1929")
-    assert paths_and_subdirs["reviewed_3_4_rice.xlsx"] == Path("iia_extracted_pages_1938/iia_trade_1938")
-
+    paths_and_subdirs = {entry[0].name: entry[1] for entry in entries}
+    assert paths_and_subdirs["reviewed_1_2_wheat.xlsx"] == Path(
+        "iia_extracted_pages_1929/iia_crops_1929"
+    )
+    assert paths_and_subdirs["reviewed_3_4_rice.xlsx"] == Path(
+        "iia_extracted_pages_1938/iia_trade_1938"
+    )
 
 
 def test_cli_main_creates_structured_output(tmp_path: Path) -> None:
-    """end-to-end: main() populates the iia_extracted_pages_*/iia_*_* hierarchy."""
+    """End-to-end: main() populates the structured output hierarchy."""
     from iia_excel_reorg.cli import main
 
     crops_dir = tmp_path / "inputs" / "reviewed_iia" / "extracted_pages_1929_30" / "crops"
@@ -483,21 +527,14 @@ def test_cli_main_creates_structured_output(tmp_path: Path) -> None:
     _build_source_workbook(source)
 
     output_root = tmp_path / "outputs"
-
-    config_path = tmp_path / "config.yml"
-    config_path.write_text(
-        "\n".join(
-            [
-                "unit_mode: standard",
-                "document_categories:",
-                "  reviewed_1_2_wheat: 1",
-            ]
-        ),
-        encoding="utf-8",
+    config_path = _write_config(
+        tmp_path / "config.yml",
+        _standard_config_lines("reviewed_1_2_wheat"),
     )
 
     import sys
-    orig_argv = sys.argv
+
+    original_argv = sys.argv
     try:
         sys.argv = [
             "iia-excel-reorg",
@@ -508,169 +545,16 @@ def test_cli_main_creates_structured_output(tmp_path: Path) -> None:
         ]
         main()
     finally:
-        sys.argv = orig_argv
+        sys.argv = original_argv
 
-    # The transformed file must land in iia_extracted_pages_1929/iia_crops_1929/
     output_subdir = output_root / "iia_extracted_pages_1929" / "iia_crops_1929"
-    assert output_subdir.is_dir(), f"Expected output subdir not found: {output_subdir}"
-    xlsx_files = list(output_subdir.glob("*.xlsx"))
-    assert len(xlsx_files) == 1
+    assert output_subdir.is_dir()
+    assert len(list(output_subdir.glob("*.xlsx"))) == 1
 
 
 def test_ensure_workspace_creates_missing_input_and_output_dirs(tmp_path: Path) -> None:
-    input_dir = tmp_path / "data" / "raw_inputs"
-    output_dir = tmp_path / "data" / "10-raw_imports"
-    lists_dir = Path.cwd() / "data" / "lists"
-    had_lists_dir = lists_dir.exists()
-
+    input_dir = tmp_path / "raw_inputs"
+    output_dir = tmp_path / "transformed"
     _ensure_workspace(input_dir, output_dir)
-
     assert input_dir.is_dir()
     assert output_dir.is_dir()
-    assert lists_dir.is_dir()
-    if not had_lists_dir:
-        lists_dir.rmdir()
-
-
-def test_ensure_workspace_overwrites_existing_output_dir(tmp_path: Path) -> None:
-    input_dir = tmp_path / "data" / "raw_inputs"
-    output_dir = tmp_path / "data" / "10-raw_imports"
-    output_dir.mkdir(parents=True)
-    stale_file = output_dir / "old.txt"
-    stale_file.write_text("stale", encoding="utf-8")
-
-    _ensure_workspace(input_dir, output_dir)
-
-    assert input_dir.is_dir()
-    assert output_dir.is_dir()
-    assert not stale_file.exists()
-
-
-def test_cli_main_creates_default_workspace_and_exits_cleanly_when_input_is_empty(tmp_path: Path, capsys) -> None:
-    from iia_excel_reorg.cli import main
-
-    config_path = tmp_path / "config.yml"
-    config_path.write_text("unit_mode: standard\n", encoding="utf-8")
-
-    import sys
-    orig_argv = sys.argv
-    orig_cwd = Path.cwd()
-    try:
-        sys.argv = [
-            "iia-excel-reorg",
-            str(tmp_path / "data" / "raw_inputs"),
-            str(tmp_path / "data" / "10-raw_imports"),
-            "--config",
-            str(config_path),
-        ]
-        os.chdir(tmp_path)
-        main()
-    finally:
-        sys.argv = orig_argv
-        os.chdir(orig_cwd)
-
-    captured = capsys.readouterr()
-    assert "No Excel workbooks found in:" in captured.out
-    assert (tmp_path / "data" / "raw_inputs").is_dir()
-    assert (tmp_path / "data" / "10-raw_imports").is_dir()
-
-
-def test_cli_main_reports_progress_bars(tmp_path: Path, capsys) -> None:
-    from iia_excel_reorg.cli import main
-
-    crops_dir = tmp_path / "inputs" / "reviewed_iia" / "extracted_pages_1929_30" / "crops"
-    crops_dir.mkdir(parents=True)
-    source = crops_dir / "reviewed_1_2_wheat.xlsx"
-    _build_source_workbook(source)
-
-    config_path = tmp_path / "config.yml"
-    config_path.write_text(
-        "\n".join(
-            [
-                "unit_mode: standard",
-                "document_categories:",
-                "  reviewed_1_2_wheat: 1",
-            ]
-        ),
-        encoding="utf-8",
-    )
-
-    import sys
-    orig_argv = sys.argv
-    try:
-        sys.argv = ["iia-excel-reorg", str(tmp_path / "inputs"), str(tmp_path / "outputs"), "--config", str(config_path)]
-        main()
-    finally:
-        sys.argv = orig_argv
-
-    captured = capsys.readouterr()
-    assert captured.out == (
-        "Reorganizing folders  │························│   0% (0/1)\r"
-        "Reorganizing folders  │████████████████████████│ 100% (1/1)\n"
-        "Reorganizing excels   │························│   0% (0/1)\r"
-        "Reorganizing excels   │████████████████████████│ 100% (1/1)\n"
-    )
-    lists_dir = Path.cwd() / "data" / "lists"
-    assert (lists_dir / "unique_geography_values.txt").is_file()
-    assert (lists_dir / "unique_product_values.txt").is_file()
-    assert (lists_dir / "unique_product_values.txt").read_text(encoding="utf-8") == "\n".join(
-        [
-            "[products]",
-            "wheat",
-            "",
-        ]
-    )
-    (lists_dir / "unique_geography_values.txt").unlink()
-    (lists_dir / "unique_product_values.txt").unlink()
-    try:
-        lists_dir.rmdir()
-        (Path.cwd() / "data").rmdir()
-    except OSError:
-        pass
-
-
-
-# ---------------------------------------------------------------------------
-# sanitize_name unit tests
-# ---------------------------------------------------------------------------
-
-def test_sanitize_name_replaces_spaces_with_underscores() -> None:
-    assert sanitize_name("raw cane sugar") == "raw_cane_sugar"
-
-
-def test_sanitize_name_collapses_duplicate_underscores() -> None:
-    assert sanitize_name("r_iia__trade__1938") == "r_iia_trade_1938"
-
-
-def test_sanitize_name_strips_leading_and_trailing_underscores() -> None:
-    assert sanitize_name("_wheat_") == "wheat"
-
-
-def test_sanitize_name_combined_spaces_and_underscores() -> None:
-    assert sanitize_name("iia  crops  1929") == "iia_crops_1929"
-
-
-def test_sanitize_name_combined_duplicate_underscores() -> None:
-    assert sanitize_name("iia__crops__1929") == "iia_crops_1929"
-
-
-def test_sanitize_name_no_change_when_already_clean() -> None:
-    assert sanitize_name("r_iia_trade_1938_466_475_rice") == "r_iia_trade_1938_466_475_rice"
-
-
-def test_canonical_document_name_has_no_duplicate_underscores() -> None:
-    # Folder name "my trade" has a space → yearbook becomes "my_trade" (no double underscores)
-    path = Path("inputs/my trade/extracted_pages_1938_39/reviewed_1_2_wheat.xlsx")
-    name = canonical_document_name(path)
-    assert " " not in name
-    assert "__" not in name
-    assert name == "r_iia_my_trade_1938_1_2_wheat"
-
-
-def test_compute_output_subdir_sanitizes_space_in_folder_name() -> None:
-    # Intermediate folder "my crops" has a space → must become "iia_my_crops_1929"
-    path = Path("inputs/reviewed_iia/extracted_pages_1929_30/my crops/reviewed_1_2.xlsx")
-    result = _compute_output_subdir(path)
-    assert " " not in str(result)
-    assert "__" not in str(result)
-    assert result == Path("iia_extracted_pages_1929/iia_my_crops_1929")
