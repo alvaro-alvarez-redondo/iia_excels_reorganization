@@ -158,6 +158,25 @@ class GeographyIndex:
         return path
 
 
+@dataclass(slots=True)
+class ProductIndex:
+    products: set[str] = field(default_factory=set)
+
+    def add_product(self, value: str) -> None:
+        if value:
+            self.products.add(value)
+
+    def write_txt(self, path: str | Path) -> Path:
+        path = Path(path)
+        lines = [
+            "[products]",
+            *sorted(self.products),
+            "",
+        ]
+        path.write_text("\n".join(lines), encoding="utf-8")
+        return path
+
+
 
 def transform_workbook(
     input_path: str | Path,

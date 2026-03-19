@@ -7,7 +7,7 @@ from pathlib import Path
 from iia_excel_reorg.cli import _compute_output_subdir, _ensure_workspace, _iter_workbooks_structured
 from iia_excel_reorg.config import WorkbookConfig, load_config
 from iia_excel_reorg.naming import canonical_document_name, extract_source_product, infer_yearbook_metadata, sanitize_name
-from iia_excel_reorg.transformer import GeographyIndex, _is_continent_row, _is_hemisphere_row, transform_workbook
+from iia_excel_reorg.transformer import GeographyIndex, ProductIndex, _is_continent_row, _is_hemisphere_row, transform_workbook
 from iia_excel_reorg.unit_rules import assign_unit
 from iia_excel_reorg.xlsx_io import SheetData, WorkbookData, read_workbook, write_workbook
 
@@ -207,6 +207,26 @@ def test_transform_workbook_collects_unique_geography_labels(tmp_path: Path) -> 
             "Belgique-Luxembourg",
             "Canada",
             "Germany",
+            "",
+        ]
+    )
+
+
+
+def test_product_index_writes_sorted_unique_products(tmp_path: Path) -> None:
+    product_index = ProductIndex()
+    product_index.add_product("rice")
+    product_index.add_product("wheat")
+    product_index.add_product("rice")
+
+    index_path = tmp_path / "unique_product_values.txt"
+    product_index.write_txt(index_path)
+
+    assert index_path.read_text(encoding="utf-8") == "\n".join(
+        [
+            "[products]",
+            "rice",
+            "wheat",
             "",
         ]
     )
@@ -456,11 +476,16 @@ def test_cli_main_creates_structured_output(tmp_path: Path) -> None:
 def test_ensure_workspace_creates_missing_input_and_output_dirs(tmp_path: Path) -> None:
     input_dir = tmp_path / "data" / "raw_inputs"
     output_dir = tmp_path / "data" / "10-raw_imports"
+    lists_dir = Path.cwd() / "data" / "lists"
+    had_lists_dir = lists_dir.exists()
 
     _ensure_workspace(input_dir, output_dir)
 
     assert input_dir.is_dir()
     assert output_dir.is_dir()
+    assert lists_dir.is_dir()
+    if not had_lists_dir:
+        lists_dir.rmdir()
 
 
 def test_ensure_workspace_overwrites_existing_output_dir(tmp_path: Path) -> None:
@@ -541,8 +566,23 @@ def test_cli_main_reports_progress_bars(tmp_path: Path, capsys) -> None:
         "Reorganizing excels: [------------------------] 0/1\r"
         "Reorganizing excels: [########################] 1/1\n"
     )
-    assert (Path.cwd() / "unique_geography_values.txt").is_file()
-    (Path.cwd() / "unique_geography_values.txt").unlink()
+    lists_dir = Path.cwd() / "data" / "lists"
+    assert (lists_dir / "unique_geography_values.txt").is_file()
+    assert (lists_dir / "unique_product_values.txt").is_file()
+    assert (lists_dir / "unique_product_values.txt").read_text(encoding="utf-8") == "\n".join(
+        [
+            "[products]",
+            "wheat",
+            "",
+        ]
+    )
+    (lists_dir / "unique_geography_values.txt").unlink()
+    (lists_dir / "unique_product_values.txt").unlink()
+    try:
+        lists_dir.rmdir()
+        (Path.cwd() / "data").rmdir()
+    except OSError:
+        pass
 
 
 
