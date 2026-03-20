@@ -137,6 +137,35 @@ KNOWN_HEMISPHERES = {
     _normalize_known_geography_label(label) for label in RAW_HEMISPHERE_LABELS
 }
 
+RAW_WORLD_TOTAL_COUNTRY_LABELS = (
+    "totaux generattx",
+    "totaux generaux",
+    "totaux generaux des imp et des exp",
+    "totaux generaux des impet des exp",
+    "totaux generaux non compris i'urss",
+    "totaux generaux non compris l'urss",
+    "totaux non compris l'u r s s generaux",
+    "generaux y compris l'u r s s",
+    "generaux y compris l'u r ss",
+    "totaux generaux compris i'urss",
+    "totaux generaux compris l'urss",
+    "y compris l'u r ss",
+    "totaux generaux des imp et des exp nettes",
+    "totaux generaux des impet des expnettes",
+    "total general net excluding the ussr",
+)
+
+
+def _normalize_country_match_label(value: str) -> str:
+    """Return a normalized country label for special-case matching."""
+    normalized = _normalize_known_geography_label(value)
+    return re.sub(r"[^a-z0-9]+", "", normalized)
+
+
+WORLD_TOTAL_COUNTRY_LABELS = {
+    _normalize_country_match_label(label) for label in RAW_WORLD_TOTAL_COUNTRY_LABELS
+}
+
 
 class TransformationError(RuntimeError):
     """Raised when a source worksheet cannot be transformed."""
@@ -414,6 +443,13 @@ def _build_output_rows(
             continue
 
         country, footnotes = _extract_country_and_footnotes(label)
+        output_continent = current_continent
+        output_continent_fill = current_continent_fill
+        if _normalize_country_match_label(country) in WORLD_TOTAL_COUNTRY_LABELS:
+            output_continent = "WORLD"
+            output_continent_fill = None
+            if geography_index is not None:
+                geography_index.add_continent(output_continent)
         footnote_values = _extract_footnotes(label)
         has_unit_related_footnotes = (
             has_unit_related_footnotes or _has_unit_related_footnote(footnotes)
@@ -429,8 +465,8 @@ def _build_output_rows(
                 years=years,
                 hemisphere=current_hemisphere,
                 hemisphere_fill=current_hemisphere_fill,
-                continent=current_continent,
-                continent_fill=current_continent_fill,
+                continent=output_continent,
+                continent_fill=output_continent_fill,
                 country=country,
                 country_fill=label_cell.fill_rgb,
                 unit=unit,
@@ -476,7 +512,14 @@ def _normalize_year_value(value: RowValue) -> RowValue:
     """Normalize OCR-confused characters in year-column values."""
     if not isinstance(value, str):
         return value
-    return value.translate(str.maketrans({"i": "1", "I": "1", "o": "0", "O": "0"}))
+    normalized = value.translate(str.maketrans({"i": "1", "I": "1", "o": "0", "O": "0"}))
+    cleaned = re.sub(r"[^\d.]", "", normalized)
+    if cleaned.count(".") <= 1:
+        return cleaned
+
+    integer_part, decimal_part = cleaned.rsplit(".", 1)
+    integer_part = integer_part.replace(".", "")
+    return f"{integer_part}.{decimal_part}" if decimal_part else integer_part
 
 
 def _clean_text(value: str | int | float | None) -> str:
