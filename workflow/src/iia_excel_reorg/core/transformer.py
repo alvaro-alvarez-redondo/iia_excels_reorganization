@@ -294,11 +294,7 @@ def transform_workbook(
     source_path = Path(input_path)
     source_workbook = read_workbook(source_path)
     target_sheets: list[SheetData] = []
-    product = workbook_config.product_for_document(source_path)
-    category = workbook_config.category_for_document(source_path)
-
     has_unit_related_footnotes = False
-    document_unit = UNIT_PLACEHOLDER
 
     for source_sheet in source_workbook.sheets:
         if not workbook_config.should_include_sheet(source_sheet.name):
@@ -307,6 +303,13 @@ def transform_workbook(
         years = _extract_year_headers(source_sheet)
         if not years:
             continue
+
+        mapped_unit = workbook_config.mapped_unit_for(source_path, source_sheet.name)
+        document_unit = (
+            mapped_unit
+            or workbook_config.override_for(source_path, source_sheet.name)
+            or UNIT_PLACEHOLDER
+        )
 
         transformed_sheet, sheet_has_unit_related_footnotes = _transform_sheet(
             source_sheet=source_sheet,

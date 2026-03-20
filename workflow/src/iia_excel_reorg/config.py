@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TypeAlias
 
+from .io.xlsx import SheetData, WorkbookData, read_workbook, write_workbook
 from .utils.naming import canonical_document_name, extract_source_product
 from .utils.text import normalize_text
 
@@ -23,6 +24,7 @@ class WorkbookConfig:
     product_aliases: dict[str, str] = field(default_factory=dict)
     product_translations: dict[str, str] = field(default_factory=dict)
     unit_overrides: dict[str, str] = field(default_factory=dict)
+    document_variable_units: dict[tuple[str, str], str] = field(default_factory=dict)
 
     def should_include_sheet(self, sheet_name: str) -> bool:
         """Return ``True`` when *sheet_name* passes the inclusion filter."""
@@ -65,6 +67,61 @@ class WorkbookConfig:
             if key in self.unit_overrides:
                 return self.unit_overrides[key]
         return self.unit_overrides.get(sheet_name.lower(), "")
+
+    def mapped_unit_for(self, document_name: str | Path, variable: str) -> str:
+        """Return mapped unit for source *document_name* and *variable* when set."""
+        normalized_variable = normalize_text(variable)
+        document_stem = Path(document_name).stem
+        normalized_document = normalize_text(document_stem)
+        return self.document_variable_units.get(
+            (normalized_document, normalized_variable),
+            "",
+        )
+
+
+def _load_document_variable_units(mapping_path: Path) -> dict[tuple[str, str], str]:
+    """Load ``(document, variable) -> unit`` mappings from an Excel workbook."""
+    if not mapping_path.exists():
+        mapping_path.parent.mkdir(parents=True, exist_ok=True)
+        template = SheetData(name="document_variable_unit_mapping")
+        template.set_cell(1, 1, "document")
+        template.set_cell(1, 2, "variable")
+        template.set_cell(1, 3, "unit")
+        write_workbook(mapping_path, WorkbookData(sheets=[template]))
+        return {}
+
+    workbook = read_workbook(mapping_path)
+    if not workbook.sheets:
+        return {}
+    mapping_sheet = workbook.sheets[0]
+
+    header_positions: dict[str, int] = {}
+    for column in range(1, mapping_sheet.max_column + 1):
+        raw_header = mapping_sheet.get_cell(1, column).value
+        header = normalize_text(str(raw_header)) if raw_header is not None else ""
+        if header in {"document", "variable", "unit"}:
+            header_positions[header] = column
+
+    required_headers = {"document", "variable", "unit"}
+    if not required_headers.issubset(header_positions):
+        return {}
+
+    units_by_document_variable: dict[tuple[str, str], str] = {}
+    for row in range(2, mapping_sheet.max_row + 1):
+        raw_document = mapping_sheet.get_cell(row, header_positions["document"]).value
+        raw_variable = mapping_sheet.get_cell(row, header_positions["variable"]).value
+        raw_unit = mapping_sheet.get_cell(row, header_positions["unit"]).value
+        if raw_document is None or raw_variable is None or raw_unit is None:
+            continue
+
+        document = normalize_text(Path(str(raw_document)).stem)
+        variable = normalize_text(str(raw_variable))
+        unit = str(raw_unit).strip()
+        if not document or not variable or not unit:
+            continue
+
+        units_by_document_variable[(document, variable)] = unit
+    return units_by_document_variable
 
 
 def _coerce_scalar(value: str) -> ScalarValue:
@@ -156,8 +213,13 @@ def _validate_mapping(raw_config: ConfigSection, key: str) -> dict[str, object]:
 
 def load_config(config_path: str | Path | None) -> WorkbookConfig:
     """Read and validate a YAML configuration file."""
+    project_root = Path(__file__).resolve().parents[3]
+    default_mapping_path = project_root / "data" / "document_variable_unit_mapping.xlsx"
+
     if config_path is None:
-        return WorkbookConfig()
+        return WorkbookConfig(
+            document_variable_units=_load_document_variable_units(default_mapping_path),
+        )
 
     path = Path(config_path)
     if not path.exists():
@@ -172,6 +234,12 @@ def load_config(config_path: str | Path | None) -> WorkbookConfig:
     product_aliases = _validate_mapping(raw_config, "product_aliases")
     product_translations = _validate_mapping(raw_config, "product_translations")
     unit_overrides = _validate_mapping(raw_config, "unit_overrides")
+    mapping_file = raw_config.get("document_variable_unit_mapping_file")
+    mapping_path = (
+        Path(str(mapping_file))
+        if mapping_file is not None
+        else default_mapping_path
+    )
 
     return WorkbookConfig(
         unit_mode=str(raw_config.get("unit_mode", "standard") or "standard"),
@@ -188,4 +256,5 @@ def load_config(config_path: str | Path | None) -> WorkbookConfig:
             normalize_text(str(key)): str(value)
             for key, value in unit_overrides.items()
         },
+        document_variable_units=_load_document_variable_units(mapping_path),
     )
