@@ -106,11 +106,13 @@ def _build_ocr_year_values_workbook(path: Path) -> None:
     area = SheetData(name="AREA")
     area.set_cell(1, 2, "1900")
     area.set_cell(1, 3, "1901")
+    area.set_cell(1, 4, "1902")
     area.set_cell(2, 1, "HÉMISPHÈRE SEPTENTRIONAL")
     area.set_cell(3, 1, "EUROPE")
     area.set_cell(4, 1, "Austria")
     area.set_cell(4, 2, "IoiO")
     area.set_cell(4, 3, "bio")
+    area.set_cell(4, 4, "1.2.3a")
     write_workbook(path, WorkbookData(sheets=[area]))
 
 
@@ -125,6 +127,17 @@ def _build_multi_continent_workbook(path: Path) -> None:
     area.set_cell(5, 1, "ASIE.")
     area.set_cell(6, 1, "Japan", fill_rgb=YELLOW)
     area.set_cell(6, 2, 8, fill_rgb=YELLOW)
+    write_workbook(path, WorkbookData(sheets=[area]))
+
+
+def _build_world_total_country_workbook(path: Path) -> None:
+    """Build a workbook where a totals-like country row should map to WORLD."""
+    area = SheetData(name="AREA")
+    area.set_cell(1, 2, "1900")
+    area.set_cell(2, 1, "HÉMISPHÈRE SEPTENTRIONAL")
+    area.set_cell(3, 1, "EUROPE")
+    area.set_cell(4, 1, "totaux non compris l'u r s s generaux")
+    area.set_cell(4, 2, 25)
     write_workbook(path, WorkbookData(sheets=[area]))
 
 
@@ -257,7 +270,8 @@ def test_transform_workbook_normalizes_ocr_like_year_values(tmp_path: Path) -> N
     result = read_workbook(output_path)
     area = result.sheets[0]
     assert area.get_cell(2, 6).value == "1010"
-    assert area.get_cell(2, 7).value == "b10"
+    assert area.get_cell(2, 7).value == "10"
+    assert area.get_cell(2, 8).value == "12.3"
 
 
 def test_transform_workbook_inserts_blank_row_before_each_new_continent(
@@ -284,6 +298,26 @@ def test_transform_workbook_inserts_blank_row_before_each_new_continent(
     assert area.get_cell(4, 2).value == "ASIE"
     assert area.get_cell(4, 3).value == "Japan"
     assert area.get_cell(4, 3).fill_rgb == YELLOW
+
+
+def test_transform_workbook_maps_world_total_country_to_world_continent(
+    tmp_path: Path,
+) -> None:
+    source_path = tmp_path / "r_iia_trade_1950_1_1_wheat.xlsx"
+    output_path = tmp_path / "standardized.xlsx"
+    _build_world_total_country_workbook(source_path)
+
+    config_path = _write_config(
+        tmp_path / "config.yml",
+        _standard_config_lines("r_iia_trade_1950_1_1_wheat"),
+    )
+
+    transform_workbook(source_path, output_path, config=load_config(config_path))
+
+    result = read_workbook(output_path)
+    area = result.sheets[0]
+    assert area.get_cell(2, 2).value == "WORLD"
+    assert area.get_cell(2, 3).value == "totaux non compris l'u r s s generaux"
 
 
 def test_transform_workbook_collects_unique_geography_labels(tmp_path: Path) -> None:
