@@ -115,6 +115,21 @@ def _build_multi_continent_workbook(path: Path) -> None:
     write_workbook(path, WorkbookData(sheets=[area]))
 
 
+def _build_document_variable_mapping_workbook(path: Path) -> None:
+    """Build the document-variable unit mapping workbook used by config tests."""
+    mapping = SheetData(name="mapping")
+    mapping.set_cell(1, 1, "document")
+    mapping.set_cell(1, 2, "variable")
+    mapping.set_cell(1, 3, "unit")
+    mapping.set_cell(2, 1, "reviewed_10_20wheat")
+    mapping.set_cell(2, 2, "AREA")
+    mapping.set_cell(2, 3, "hectares")
+    mapping.set_cell(3, 1, "reviewed_10_20wheat")
+    mapping.set_cell(3, 2, "PRODUCTION")
+    mapping.set_cell(3, 3, "tonnes")
+    write_workbook(path, WorkbookData(sheets=[mapping]))
+
+
 def _standard_config_lines(
     document_name: str, *, unit_mode: str = "standard"
 ) -> list[str]:
@@ -257,7 +272,6 @@ def test_transform_workbook_collects_unique_geography_labels(tmp_path: Path) -> 
         config=load_config(config_path),
         geography_index=geography_index,
     )
-
     assert geography_index.hemispheres == {
         "HÉMISPHÈRE SEPTENTRIONAL",
         "Hemisphère méridional",
@@ -284,6 +298,54 @@ def test_transform_workbook_collects_unique_geography_labels(tmp_path: Path) -> 
     ) == "\n".join(
         ["[countries]", "Austria", "Belgique-Luxembourg", "Canada", "Germany", ""]
     )
+
+
+def test_transform_workbook_assigns_units_from_document_variable_mapping(
+    tmp_path: Path,
+) -> None:
+    source_path = tmp_path / "reviewed_10_20wheat.xlsx"
+    output_path = tmp_path / "standardized.xlsx"
+    mapping_path = tmp_path / "document_variable_unit_mapping.xlsx"
+    _build_source_workbook(source_path)
+    _build_document_variable_mapping_workbook(mapping_path)
+
+    config_path = _write_config(
+        tmp_path / "config.yml",
+        [
+            "unit_mode: standard",
+            f"document_variable_unit_mapping_file: {mapping_path.as_posix()}",
+        ],
+    )
+
+    transform_workbook(source_path, output_path, config=load_config(config_path))
+
+    result = read_workbook(output_path)
+    assert result.sheets[0].name == "area"
+    assert result.sheets[0].get_cell(2, 4).value == "hectares"
+    assert result.sheets[1].name == "production"
+    assert result.sheets[1].get_cell(2, 4).value == "tonnes"
+
+
+def test_load_config_creates_mapping_template_when_file_is_missing(
+    tmp_path: Path,
+) -> None:
+    mapping_path = tmp_path / "data" / "document_variable_unit_mapping.xlsx"
+    config_path = _write_config(
+        tmp_path / "config.yml",
+        [
+            "unit_mode: standard",
+            f"document_variable_unit_mapping_file: {mapping_path.as_posix()}",
+        ],
+    )
+
+    loaded_config = load_config(config_path)
+
+    assert loaded_config.document_variable_units == {}
+    assert mapping_path.exists()
+    created_mapping = read_workbook(mapping_path)
+    assert created_mapping.sheets[0].get_cell(1, 1).value == "document"
+    assert created_mapping.sheets[0].get_cell(1, 2).value == "variable"
+    assert created_mapping.sheets[0].get_cell(1, 3).value == "unit"
 
 
 def test_extract_footnotes_normalizes_and_deduplicates_index_output(
