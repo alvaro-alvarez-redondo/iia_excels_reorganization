@@ -167,7 +167,7 @@ def test_transform_workbook_assigns_units_from_rules_and_preserves_notes(
     assert area.get_cell(2, 1).value == "HÉMISPHÈRE SEPTENTRIONAL"
     assert area.get_cell(2, 2).value == "EUROPE"
     assert area.get_cell(2, 3).value == "Belgique-Luxembourg"
-    assert area.get_cell(2, 4).value == "1000 ha"
+    assert area.get_cell(2, 4).value == "__NA_UNIT__"
     assert area.get_cell(2, 5).value == "reexports; special case"
     assert area.get_cell(2, 6).value == 17268
     assert area.get_cell(2, 7).value == 11887
@@ -183,7 +183,7 @@ def test_transform_workbook_assigns_units_from_rules_and_preserves_notes(
     assert production.get_cell(2, 1).value == "Hemisphère méridional"
     assert production.get_cell(2, 2).value == "Amérique"
     assert production.get_cell(2, 3).value == "Canada"
-    assert production.get_cell(2, 4).value == "1000 q"
+    assert production.get_cell(2, 4).value == "__NA_UNIT__"
     assert production.get_cell(2, 6).value == 194876
     assert production.get_cell(2, 7).value == 315569
 
@@ -385,7 +385,7 @@ def test_transform_workbook_supports_inputs_mode_and_harmonized_output_names(
     imports = result.sheets[2]
     assert imports.name == "imports"
     assert imports.get_cell(2, 3).value == "Austria"
-    assert imports.get_cell(2, 4).value == "1000 kg"
+    assert imports.get_cell(2, 4).value == "__NA_UNIT__"
     assert imports.get_cell(2, 5).value == "unit note q"
     assert imports.get_cell(2, 6).value == 7.5
     assert imports.get_cell(2, 7).value == 0.2
@@ -433,12 +433,12 @@ def test_naming_and_unit_rules_cover_reviewed_documents() -> None:
         )
         == "r_iia_trade_1938_239_239_raw_cane_sugar"
     )
-    assert assign_unit("imports", "te", 1) == "tonnes"
-    assert assign_unit("imports", "te", 2) == "q"
-    assert assign_unit("production", "vino", 1) == "1000 hl"
-    assert assign_unit("production", "huevos", 2) == "1000 eggs"
-    assert assign_unit("livestock", "whatever", 1) == "1000 heads"
-    assert assign_unit("production", "whatever", None) == ""
+    assert assign_unit("imports", "te", 1) == "__NA_UNIT__"
+    assert assign_unit("imports", "te", 2) == "__NA_UNIT__"
+    assert assign_unit("production", "vino", 1) == "__NA_UNIT__"
+    assert assign_unit("production", "huevos", 2) == "__NA_UNIT__"
+    assert assign_unit("livestock", "whatever", 1) == "__NA_UNIT__"
+    assert assign_unit("production", "whatever", None) == "__NA_UNIT__"
 
 
 def test_canonical_document_name_translates_multiword_reviewed_product_at_end(

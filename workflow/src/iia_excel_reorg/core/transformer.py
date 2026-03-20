@@ -11,7 +11,7 @@ from typing import TypeAlias
 
 from ..config import WorkbookConfig
 from ..io.xlsx import SheetData, WorkbookData, read_workbook, write_workbook
-from ..services.units import assign_unit
+from ..services.units import UNIT_PLACEHOLDER
 
 HeaderYear: TypeAlias = tuple[int, str]
 RowValue: TypeAlias = str | int | float | None
@@ -298,6 +298,7 @@ def transform_workbook(
     category = workbook_config.category_for_document(source_path)
 
     has_unit_related_footnotes = False
+    document_unit = UNIT_PLACEHOLDER
 
     for source_sheet in source_workbook.sheets:
         if not workbook_config.should_include_sheet(source_sheet.name):
@@ -307,18 +308,10 @@ def transform_workbook(
         if not years:
             continue
 
-        unit = workbook_config.override_for(
-            source_path, source_sheet.name
-        ) or assign_unit(
-            variable=source_sheet.name,
-            product=product,
-            category=category,
-            mode=workbook_config.unit_mode,
-        )
         transformed_sheet, sheet_has_unit_related_footnotes = _transform_sheet(
             source_sheet=source_sheet,
             years=years,
-            unit=unit,
+            unit=document_unit,
             geography_index=geography_index,
         )
         target_sheets.append(transformed_sheet)
