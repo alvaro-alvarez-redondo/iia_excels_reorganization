@@ -21,6 +21,7 @@ from .core.transformer import (  # noqa: F401
     UnitFootnoteDocumentIndex,
     TransformationError,
     _clean_text,
+    _extract_country,
     _extract_country_and_footnotes,
     _extract_footnotes,
     _extract_year_headers,

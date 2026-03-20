@@ -392,7 +392,8 @@ def _build_output_rows(
                 geography_index.add_continent(current_continent)
             continue
 
-        country, footnotes = _extract_country_and_footnotes(label)
+        country = _extract_country(label)
+        footnotes = "; ".join(footnote_values)
         has_unit_related_footnotes = (
             has_unit_related_footnotes or _has_unit_related_footnote(footnotes)
         )
