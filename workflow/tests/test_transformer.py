@@ -16,6 +16,8 @@ from iia_excel_reorg.naming import (
     infer_yearbook_metadata,
 )
 from iia_excel_reorg.transformer import (
+    DocumentIndex,
+    FootnoteIndex,
     GeographyIndex,
     ProductIndex,
     UnitFootnoteDocumentIndex,
@@ -266,8 +268,34 @@ def test_transform_workbook_collects_unique_geography_labels(tmp_path: Path) -> 
         "Germany",
     }
 
-    index_path = tmp_path / "unique_geography_values.txt"
-    geography_index.write_txt(index_path)
+    geography_index.write_split_txts(tmp_path)
+    assert (tmp_path / "unique_hemisphere_values.txt").read_text(
+        encoding="utf-8"
+    ) == "\n".join(
+        ["[hemispheres]", "Hemisphère méridional", "HÉMISPHÈRE SEPTENTRIONAL", ""]
+    )
+    assert (tmp_path / "unique_continent_values.txt").read_text(
+        encoding="utf-8"
+    ) == "\n".join(["[continents]", "Amérique", "EUROPE", ""])
+    assert (tmp_path / "unique_country_values.txt").read_text(
+        encoding="utf-8"
+    ) == "\n".join(
+        ["[countries]", "Austria", "Belgique-Luxembourg", "Canada", "Germany", ""]
+    )
+
+
+def test_extract_footnotes_normalizes_and_deduplicates_index_output(
+    tmp_path: Path,
+) -> None:
+    footnote_index = FootnoteIndex()
+    footnote_index.add_footnotes(
+        _extract_footnotes("Austria ( unit note q ) (special case.)")
+    )
+    footnote_index.add_footnotes(_extract_footnotes("Belgium (special case) (r)"))
+
+    index_path = tmp_path / "unique_footnotes.txt"
+    footnote_index.write_txt(index_path)
+
     assert index_path.read_text(encoding="utf-8") == "\n".join(
         [
             "[hemispheres]",

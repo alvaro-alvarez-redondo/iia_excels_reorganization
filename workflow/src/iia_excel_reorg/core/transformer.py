@@ -167,7 +167,7 @@ class GeographyIndex:
             self.hemispheres.add(value)
 
     def write_txt(self, path: str | Path) -> Path:
-        """Write sorted geography labels to *path* in an INI-like text format."""
+        """Write all geography labels to *path* in the legacy combined format."""
         output_path = Path(path)
         sections = {
             "hemispheres": sorted(self.hemispheres),
@@ -179,6 +179,40 @@ class GeographyIndex:
             output_lines.extend([f"[{label}]", *values, ""])
         output_path.write_text("\n".join(output_lines), encoding="utf-8")
         return output_path
+
+    def write_dimension_txt(self, path: str | Path, *, label: str) -> Path:
+        """Write one geography dimension to *path* in a deduplicated TXT format."""
+        output_path = Path(path)
+        values_by_label = {
+            "hemispheres": self.hemispheres,
+            "continents": self.continents,
+            "countries": self.countries,
+        }
+        values = values_by_label[label]
+        output_path.write_text(
+            "\n".join([f"[{label}]", *sorted(values), ""]),
+            encoding="utf-8",
+        )
+        return output_path
+
+    def write_split_txts(self, directory: str | Path) -> list[Path]:
+        """Write separate deduplicated TXT files for each geography dimension."""
+        output_dir = Path(directory)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        return [
+            self.write_dimension_txt(
+                output_dir / "unique_hemisphere_values.txt",
+                label="hemispheres",
+            ),
+            self.write_dimension_txt(
+                output_dir / "unique_continent_values.txt",
+                label="continents",
+            ),
+            self.write_dimension_txt(
+                output_dir / "unique_country_values.txt",
+                label="countries",
+            ),
+        ]
 
 
 @dataclass(slots=True)
@@ -364,6 +398,8 @@ def _build_output_rows(
         )
         if geography_index is not None:
             geography_index.add_country(country)
+        if footnote_index is not None:
+            footnote_index.add_footnotes(footnote_values)
         output_rows.append(
             _build_output_row(
                 source_sheet=source_sheet,
@@ -441,11 +477,9 @@ def _normalize_footnote(value: str) -> str:
     return re.sub(r"\s+", " ", value.strip(" .;,")).strip()
 
 
-def _extract_country_and_footnotes(label: str) -> tuple[str, str]:
-    """Split a row label into country name and semicolon-separated footnotes."""
+def _extract_footnotes(label: str) -> list[str]:
+    """Return normalized footnotes extracted from *label*."""
     footnotes = [_normalize_footnote(match) for match in PAREN_RE.findall(label)]
-    country = PAREN_RE.sub("", label).strip()
-    country = _strip_terminal_punctuation(country)
     normalized_notes = [note for note in footnotes if note]
     if not normalized_notes and label.endswith("(r)"):
         normalized_notes = ["reexports"]
