@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from iia_excel_reorg.cli import (
+    DuplicateOriginalDocumentIndex,
     _compute_output_subdir,
     _ensure_workspace,
     _iter_workbooks_structured,
@@ -21,6 +22,7 @@ from iia_excel_reorg.transformer import (
     GeographyIndex,
     ProductIndex,
     UnitFootnoteDocumentIndex,
+    _extract_footnotes,
     _is_continent_row,
     _is_hemisphere_row,
     transform_workbook,
@@ -166,7 +168,7 @@ def test_transform_workbook_assigns_units_from_rules_and_preserves_notes(
     assert area.get_cell(2, 1).value == "HÉMISPHÈRE SEPTENTRIONAL"
     assert area.get_cell(2, 2).value == "EUROPE"
     assert area.get_cell(2, 3).value == "Belgique-Luxembourg"
-    assert area.get_cell(2, 4).value == "1000 ha"
+    assert area.get_cell(2, 4).value == "__NA_UNIT__"
     assert area.get_cell(2, 5).value == "reexports; special case"
     assert area.get_cell(2, 6).value == 17268
     assert area.get_cell(2, 7).value == 11887
@@ -182,7 +184,7 @@ def test_transform_workbook_assigns_units_from_rules_and_preserves_notes(
     assert production.get_cell(2, 1).value == "Hemisphère méridional"
     assert production.get_cell(2, 2).value == "Amérique"
     assert production.get_cell(2, 3).value == "Canada"
-    assert production.get_cell(2, 4).value == "1000 q"
+    assert production.get_cell(2, 4).value == "__NA_UNIT__"
     assert production.get_cell(2, 6).value == 194876
     assert production.get_cell(2, 7).value == 315569
 
@@ -297,22 +299,21 @@ def test_extract_footnotes_normalizes_and_deduplicates_index_output(
     footnote_index.write_txt(index_path)
 
     assert index_path.read_text(encoding="utf-8") == "\n".join(
-        [
-            "[hemispheres]",
-            "Hemisphère méridional",
-            "HÉMISPHÈRE SEPTENTRIONAL",
-            "",
-            "[continents]",
-            "Amérique",
-            "EUROPE",
-            "",
-            "[countries]",
-            "Austria",
-            "Belgique-Luxembourg",
-            "Canada",
-            "Germany",
-            "",
-        ]
+        ["[footnotes]", "reexports", "special case", "unit note q", ""]
+    )
+
+
+def test_document_index_writes_sorted_unique_documents(tmp_path: Path) -> None:
+    document_index = DocumentIndex()
+    document_index.add_document("b.xlsx")
+    document_index.add_document("a.xlsx")
+    document_index.add_document("b.xlsx")
+
+    index_path = tmp_path / "final_docs.txt"
+    document_index.write_txt(index_path)
+
+    assert index_path.read_text(encoding="utf-8") == "\n".join(
+        ["[documents]", "a.xlsx", "b.xlsx", ""]
     )
 
 
@@ -385,7 +386,7 @@ def test_transform_workbook_supports_inputs_mode_and_harmonized_output_names(
     imports = result.sheets[2]
     assert imports.name == "imports"
     assert imports.get_cell(2, 3).value == "Austria"
-    assert imports.get_cell(2, 4).value == "1000 kg"
+    assert imports.get_cell(2, 4).value == "__NA_UNIT__"
     assert imports.get_cell(2, 5).value == "unit note q"
     assert imports.get_cell(2, 6).value == 7.5
     assert imports.get_cell(2, 7).value == 0.2
@@ -433,12 +434,12 @@ def test_naming_and_unit_rules_cover_reviewed_documents() -> None:
         )
         == "r_iia_trade_1938_239_239_raw_cane_sugar"
     )
-    assert assign_unit("imports", "te", 1) == "tonnes"
-    assert assign_unit("imports", "te", 2) == "q"
-    assert assign_unit("production", "vino", 1) == "1000 hl"
-    assert assign_unit("production", "huevos", 2) == "1000 eggs"
-    assert assign_unit("livestock", "whatever", 1) == "1000 heads"
-    assert assign_unit("production", "whatever", None) == ""
+    assert assign_unit("imports", "te", 1) == "__NA_UNIT__"
+    assert assign_unit("imports", "te", 2) == "__NA_UNIT__"
+    assert assign_unit("production", "vino", 1) == "__NA_UNIT__"
+    assert assign_unit("production", "huevos", 2) == "__NA_UNIT__"
+    assert assign_unit("livestock", "whatever", 1) == "__NA_UNIT__"
+    assert assign_unit("production", "whatever", None) == "__NA_UNIT__"
 
 
 def test_canonical_document_name_translates_multiword_reviewed_product_at_end(
@@ -563,6 +564,38 @@ def test_compute_output_subdir_without_extracted_pages() -> None:
     assert _compute_output_subdir(path) == Path(".")
 
 
+def test_duplicate_original_document_index_lists_only_duplicate_names(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "inputs"
+    first = root / "reviewed_iia" / "extracted_pages_1929_30" / "crops" / "same.xlsx"
+    second = root / "reviewed_iia" / "extracted_pages_1938_39" / "trade" / "same.xlsx"
+    third = root / "reviewed_iia" / "extracted_pages_1938_39" / "trade" / "other.xlsx"
+    first.parent.mkdir(parents=True)
+    second.parent.mkdir(parents=True, exist_ok=True)
+    first.write_text("a", encoding="utf-8")
+    second.write_text("b", encoding="utf-8")
+    third.write_text("c", encoding="utf-8")
+
+    index = DuplicateOriginalDocumentIndex()
+    index.add_document(first, root=root)
+    index.add_document(second, root=root)
+    index.add_document(third, root=root)
+
+    output_path = tmp_path / "duplicated_original_documents.txt"
+    index.write_txt(output_path)
+
+    assert output_path.read_text(encoding="utf-8") == "\n".join(
+        [
+            "[documents]",
+            "same.xlsx",
+            "  reviewed_iia/extracted_pages_1929_30/crops/same.xlsx",
+            "  reviewed_iia/extracted_pages_1938_39/trade/same.xlsx",
+            "",
+        ]
+    )
+
+
 def test_iter_workbooks_structured_builds_correct_hierarchy(tmp_path: Path) -> None:
     crops_dir = tmp_path / "reviewed_iia" / "extracted_pages_1929_30" / "crops"
     trade_dir = tmp_path / "reviewed_iia" / "extracted_pages_1938_39" / "trade"
@@ -626,12 +659,20 @@ def test_cli_main_creates_structured_output(
     transformed_files = list(output_subdir.glob("*.xlsx"))
     assert len(transformed_files) == 1
     lists_dir = tmp_path / "lists"
-    assert (lists_dir / "unique_geography_values.txt").is_file()
+    assert (lists_dir / "unique_hemisphere_values.txt").is_file()
+    assert (lists_dir / "unique_continent_values.txt").is_file()
+    assert (lists_dir / "unique_country_values.txt").is_file()
     assert (lists_dir / "unique_product_values.txt").is_file()
+    final_docs_path = lists_dir / "final_docs.txt"
+    assert final_docs_path.read_text(encoding="utf-8") == (
+        "[documents]\n" f"{transformed_files[0].name}\n"
+    )
     unit_docs_path = lists_dir / "final_docs_with_unit_footnotes.txt"
     assert unit_docs_path.read_text(encoding="utf-8") == (
         "[documents]\n" f"{transformed_files[0].name}\n"
     )
+    duplicate_original_docs_path = lists_dir / "duplicated_original_documents.txt"
+    assert duplicate_original_docs_path.read_text(encoding="utf-8") == "[documents]\n"
     captured = capsys.readouterr()
     assert "Generating txt lists" in captured.out
 
@@ -642,3 +683,56 @@ def test_ensure_workspace_creates_missing_input_and_output_dirs(tmp_path: Path) 
     _ensure_workspace(input_dir, output_dir)
     assert input_dir.is_dir()
     assert output_dir.is_dir()
+
+
+def test_cli_main_lists_duplicate_original_documents(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    import iia_excel_reorg.cli as cli
+
+    monkeypatch.setattr(cli, "LISTS_DIR", tmp_path / "lists")
+    main = cli.main
+
+    crops_dir = (
+        tmp_path / "inputs" / "reviewed_iia" / "extracted_pages_1929_30" / "crops"
+    )
+    trade_dir = (
+        tmp_path / "inputs" / "reviewed_iia" / "extracted_pages_1938_39" / "trade"
+    )
+    crops_dir.mkdir(parents=True)
+    trade_dir.mkdir(parents=True)
+    shared_name = "reviewed_1_2_wheat.xlsx"
+    _build_source_workbook(crops_dir / shared_name)
+    _build_source_workbook(trade_dir / shared_name)
+
+    output_root = tmp_path / "outputs"
+    config_path = _write_config(
+        tmp_path / "config.yml",
+        _standard_config_lines("reviewed_1_2_wheat"),
+    )
+
+    import sys
+
+    original_argv = sys.argv
+    try:
+        sys.argv = [
+            "iia-excel-reorg",
+            str(tmp_path / "inputs"),
+            str(output_root),
+            "--config",
+            str(config_path),
+        ]
+        main()
+    finally:
+        sys.argv = original_argv
+
+    duplicate_original_docs_path = tmp_path / "lists" / "duplicated_original_documents.txt"
+    assert duplicate_original_docs_path.read_text(encoding="utf-8") == "\n".join(
+        [
+            "[documents]",
+            shared_name,
+            "  reviewed_iia/extracted_pages_1929_30/crops/reviewed_1_2_wheat.xlsx",
+            "  reviewed_iia/extracted_pages_1938_39/trade/reviewed_1_2_wheat.xlsx",
+            "",
+        ]
+    )
