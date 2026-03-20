@@ -16,6 +16,7 @@ from .core.transformer import (  # noqa: F401
     RAW_HEMISPHERE_LABELS,
     GeographyIndex,
     ProductIndex,
+    UnitFootnoteDocumentIndex,
     TransformationError,
     _clean_text,
     _extract_country_and_footnotes,
