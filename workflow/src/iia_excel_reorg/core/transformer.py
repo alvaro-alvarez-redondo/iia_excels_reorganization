@@ -282,13 +282,15 @@ def transform_workbook(
         if not years:
             continue
 
-        unit = workbook_config.override_for(
-            source_path, source_sheet.name
-        ) or assign_unit(
-            variable=source_sheet.name,
-            product=product,
-            category=category,
-            mode=workbook_config.unit_mode,
+        unit = (
+            workbook_config.mapped_unit_for(source_path, source_sheet.name)
+            or workbook_config.override_for(source_path, source_sheet.name)
+            or assign_unit(
+                variable=source_sheet.name,
+                product=product,
+                category=category,
+                mode=workbook_config.unit_mode,
+            )
         )
         transformed_sheet, sheet_has_unit_related_footnotes = _transform_sheet(
             source_sheet=source_sheet,
