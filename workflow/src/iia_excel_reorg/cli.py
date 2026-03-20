@@ -8,14 +8,7 @@ import sys
 from pathlib import Path
 from typing import Callable, TypeAlias
 from .config import load_config
-from .core.transformer import (
-    DocumentIndex,
-    FootnoteIndex,
-    GeographyIndex,
-    ProductIndex,
-    UnitFootnoteDocumentIndex,
-    transform_workbook,
-)
+from .core.transformer import GeographyIndex, ProductIndex, transform_workbook
 from .utils.naming import sanitize_name
 from .utils.text import derive_product_from_document
 
@@ -33,9 +26,6 @@ HEMISPHERE_INDEX_FILENAME = "unique_hemisphere_values.txt"
 CONTINENT_INDEX_FILENAME = "unique_continent_values.txt"
 COUNTRY_INDEX_FILENAME = "unique_country_values.txt"
 PRODUCT_INDEX_FILENAME = "unique_product_values.txt"
-FOOTNOTE_INDEX_FILENAME = "unique_footnotes.txt"
-DOCUMENT_INDEX_FILENAME = "final_docs_all.txt"
-UNIT_FOOTNOTE_DOCUMENT_INDEX_FILENAME = "final_docs_with_unit_footnotes.txt"
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 LISTS_DIR = PROJECT_ROOT / "data" / "lists"
 
@@ -198,9 +188,6 @@ def main() -> None:
         return
     geography_index = GeographyIndex()
     product_index = ProductIndex()
-    footnote_index = FootnoteIndex()
-    document_index = DocumentIndex()
-    unit_footnote_document_index = UnitFootnoteDocumentIndex()
 
     def prepare_output(entry: WorkbookEntry) -> None:
         """Create the output subdirectory for *entry* if needed."""
@@ -220,58 +207,13 @@ def main() -> None:
             output_path,
             config=config,
             geography_index=geography_index,
-            document_index=document_index,
-            footnote_index=footnote_index,
-            unit_footnote_document_index=unit_footnote_document_index,
         )
         product_index.add_product(derive_product_from_document(output_path.name))
 
     _run_progress("Reorganizing folders", workbook_entries, prepare_output)
     _run_progress("Reorganizing excels", workbook_entries, transform_entry)
-    _run_txt_progress(
-        "Generating txt lists",
-        [
-            (
-                HEMISPHERE_INDEX_FILENAME,
-                lambda: geography_index.write_dimension_txt(
-                    LISTS_DIR / HEMISPHERE_INDEX_FILENAME,
-                    label="hemispheres",
-                ),
-            ),
-            (
-                CONTINENT_INDEX_FILENAME,
-                lambda: geography_index.write_dimension_txt(
-                    LISTS_DIR / CONTINENT_INDEX_FILENAME,
-                    label="continents",
-                ),
-            ),
-            (
-                COUNTRY_INDEX_FILENAME,
-                lambda: geography_index.write_dimension_txt(
-                    LISTS_DIR / COUNTRY_INDEX_FILENAME,
-                    label="countries",
-                ),
-            ),
-            (
-                PRODUCT_INDEX_FILENAME,
-                lambda: product_index.write_txt(LISTS_DIR / PRODUCT_INDEX_FILENAME),
-            ),
-            (
-                FOOTNOTE_INDEX_FILENAME,
-                lambda: footnote_index.write_txt(LISTS_DIR / FOOTNOTE_INDEX_FILENAME),
-            ),
-            (
-                DOCUMENT_INDEX_FILENAME,
-                lambda: document_index.write_txt(LISTS_DIR / DOCUMENT_INDEX_FILENAME),
-            ),
-            (
-                UNIT_FOOTNOTE_DOCUMENT_INDEX_FILENAME,
-                lambda: unit_footnote_document_index.write_txt(
-                    LISTS_DIR / UNIT_FOOTNOTE_DOCUMENT_INDEX_FILENAME
-                ),
-            ),
-        ],
-    )
+    geography_index.write_txt(LISTS_DIR / GEOGRAPHY_INDEX_FILENAME)
+    product_index.write_txt(LISTS_DIR / PRODUCT_INDEX_FILENAME)
 
 
 if __name__ == "__main__":

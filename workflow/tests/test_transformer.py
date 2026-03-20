@@ -21,7 +21,6 @@ from iia_excel_reorg.transformer import (
     GeographyIndex,
     ProductIndex,
     UnitFootnoteDocumentIndex,
-    _extract_footnotes,
     _is_continent_row,
     _is_hemisphere_row,
     transform_workbook,
@@ -298,7 +297,22 @@ def test_extract_footnotes_normalizes_and_deduplicates_index_output(
     footnote_index.write_txt(index_path)
 
     assert index_path.read_text(encoding="utf-8") == "\n".join(
-        ["[footnotes]", "reexports", "special case", "unit note q", ""]
+        [
+            "[hemispheres]",
+            "Hemisphère méridional",
+            "HÉMISPHÈRE SEPTENTRIONAL",
+            "",
+            "[continents]",
+            "Amérique",
+            "EUROPE",
+            "",
+            "[countries]",
+            "Austria",
+            "Belgique-Luxembourg",
+            "Canada",
+            "Germany",
+            "",
+        ]
     )
 
 
@@ -308,8 +322,6 @@ def test_transform_workbook_tracks_documents_with_unit_related_footnotes(
     source_path = tmp_path / "r_iia_trade_1950_3_5_wheat.xlsx"
     output_path = tmp_path / "standardized.xlsx"
     _build_source_workbook(source_path, include_imports=True)
-    document_index = DocumentIndex()
-    footnote_index = FootnoteIndex()
     unit_footnote_document_index = UnitFootnoteDocumentIndex()
 
     config_path = _write_config(
@@ -321,13 +333,9 @@ def test_transform_workbook_tracks_documents_with_unit_related_footnotes(
         source_path,
         output_path,
         config=load_config(config_path),
-        document_index=document_index,
-        footnote_index=footnote_index,
         unit_footnote_document_index=unit_footnote_document_index,
     )
 
-    assert document_index.documents == {"standardized.xlsx"}
-    assert footnote_index.footnotes == {"reexports", "special case", "unit note q"}
     assert unit_footnote_document_index.documents == {"standardized.xlsx"}
     txt_path = unit_footnote_document_index.write_txt(tmp_path / "unit_footnotes.txt")
     assert txt_path.read_text(encoding="utf-8") == "[documents]\nstandardized.xlsx\n"
@@ -618,18 +626,8 @@ def test_cli_main_creates_structured_output(
     transformed_files = list(output_subdir.glob("*.xlsx"))
     assert len(transformed_files) == 1
     lists_dir = tmp_path / "lists"
-    assert (lists_dir / "unique_hemisphere_values.txt").is_file()
-    assert (lists_dir / "unique_continent_values.txt").is_file()
-    assert (lists_dir / "unique_country_values.txt").is_file()
+    assert (lists_dir / "unique_geography_values.txt").is_file()
     assert (lists_dir / "unique_product_values.txt").is_file()
-    all_docs_path = lists_dir / "final_docs_all.txt"
-    assert all_docs_path.read_text(encoding="utf-8") == (
-        "[documents]\n" f"{transformed_files[0].name}\n"
-    )
-    footnotes_path = lists_dir / "unique_footnotes.txt"
-    assert footnotes_path.read_text(encoding="utf-8") == (
-        "[footnotes]\n" "reexports\n" "special case\n" "unit note q\n"
-    )
     unit_docs_path = lists_dir / "final_docs_with_unit_footnotes.txt"
     assert unit_docs_path.read_text(encoding="utf-8") == (
         "[documents]\n" f"{transformed_files[0].name}\n"

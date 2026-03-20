@@ -236,76 +236,11 @@ class ProductIndex:
         return output_path
 
 
-@dataclass(slots=True)
-class FootnoteIndex:
-    """Accumulate unique normalized footnotes seen across transformed workbooks."""
-
-    footnotes: set[str] = field(default_factory=set)
-
-    def add_footnotes(self, values: list[str]) -> None:
-        """Add non-empty normalized footnotes from *values*."""
-        self.footnotes.update(value for value in values if value)
-
-    def write_txt(self, path: str | Path) -> Path:
-        """Write sorted unique footnotes to *path* in an INI-like text format."""
-        output_path = Path(path)
-        output_path.write_text(
-            "\n".join(["[footnotes]", *sorted(self.footnotes), ""]),
-            encoding="utf-8",
-        )
-        return output_path
-
-
-@dataclass(slots=True)
-class DocumentIndex:
-    """Track all transformed document names."""
-
-    documents: set[str] = field(default_factory=set)
-
-    def add_document(self, value: str) -> None:
-        """Add *value* when non-empty."""
-        if value:
-            self.documents.add(value)
-
-    def write_txt(self, path: str | Path) -> Path:
-        """Write sorted transformed document names to *path*."""
-        output_path = Path(path)
-        output_path.write_text(
-            "\n".join(["[documents]", *sorted(self.documents), ""]),
-            encoding="utf-8",
-        )
-        return output_path
-
-
-@dataclass(slots=True)
-class UnitFootnoteDocumentIndex:
-    """Track transformed document names whose footnotes reference units."""
-
-    documents: set[str] = field(default_factory=set)
-
-    def add_document(self, value: str) -> None:
-        """Add *value* when a transformed document contains unit-related footnotes."""
-        if value:
-            self.documents.add(value)
-
-    def write_txt(self, path: str | Path) -> Path:
-        """Write transformed document names with unit-related footnotes to *path*."""
-        output_path = Path(path)
-        output_path.write_text(
-            "\n".join(["[documents]", *sorted(self.documents), ""]),
-            encoding="utf-8",
-        )
-        return output_path
-
-
 def transform_workbook(
     input_path: str | Path,
     output_path: str | Path,
     config: WorkbookConfig | None = None,
     geography_index: GeographyIndex | None = None,
-    document_index: DocumentIndex | None = None,
-    footnote_index: FootnoteIndex | None = None,
-    unit_footnote_document_index: UnitFootnoteDocumentIndex | None = None,
 ) -> Path:
     """Read *input_path*, transform each eligible sheet, and write to *output_path*."""
     workbook_config = config or WorkbookConfig()
@@ -333,16 +268,13 @@ def transform_workbook(
             category=category,
             mode=workbook_config.unit_mode,
         )
-        transformed_sheet, sheet_has_unit_related_footnotes = _transform_sheet(
-            source_sheet=source_sheet,
-            years=years,
-            unit=unit,
-            geography_index=geography_index,
-            footnote_index=footnote_index,
-        )
-        target_sheets.append(transformed_sheet)
-        has_unit_related_footnotes = (
-            has_unit_related_footnotes or sheet_has_unit_related_footnotes
+        target_sheets.append(
+            _transform_sheet(
+                source_sheet=source_sheet,
+                years=years,
+                unit=unit,
+                geography_index=geography_index,
+            )
         )
 
     if not target_sheets:
@@ -350,14 +282,7 @@ def transform_workbook(
             f"No transformable sheets found in workbook: {source_path.name}"
         )
 
-    written_output_path = write_workbook(
-        output_path, WorkbookData(sheets=target_sheets)
-    )
-    if document_index is not None:
-        document_index.add_document(written_output_path.name)
-    if has_unit_related_footnotes and unit_footnote_document_index is not None:
-        unit_footnote_document_index.add_document(written_output_path.name)
-    return written_output_path
+    return write_workbook(output_path, WorkbookData(sheets=target_sheets))
 
 
 def _extract_year_headers(sheet: SheetData) -> list[HeaderYear]:
@@ -374,20 +299,11 @@ def _transform_sheet(
     years: list[HeaderYear],
     unit: str,
     geography_index: GeographyIndex | None = None,
-    document_index: DocumentIndex | None = None,
-    footnote_index: FootnoteIndex | None = None,
-) -> tuple[SheetData, bool]:
+) -> SheetData:
     """Convert one source sheet into the standardized long-format layout."""
     target_sheet = SheetData(name=source_sheet.name.lower())
     _write_headers(target_sheet, years)
 
-    output_rows, has_unit_related_footnotes = _build_output_rows(
-        source_sheet,
-        years,
-        unit,
-        geography_index,
-        footnote_index,
-    )
     target_row = 2
     for output_row in output_rows:
         if output_row is None:
@@ -410,8 +326,7 @@ def _build_output_rows(
     years: list[HeaderYear],
     unit: str,
     geography_index: GeographyIndex | None,
-    footnote_index: FootnoteIndex | None,
-) -> tuple[list[OutputRow | None], bool]:
+) -> list[OutputRow | None]:
     """Build normalized output rows before materializing the target worksheet."""
     output_rows: list[OutputRow | None] = []
     has_unit_related_footnotes = False
@@ -442,11 +357,7 @@ def _build_output_rows(
                 geography_index.add_continent(current_continent)
             continue
 
-        footnote_values = _extract_footnotes(label)
-        country, footnotes = _extract_country_and_footnotes(label, footnote_values)
-        has_unit_related_footnotes = (
-            has_unit_related_footnotes or _has_unit_related_footnote(footnotes)
-        )
+        country, footnotes = _extract_country_and_footnotes(label)
         if geography_index is not None:
             geography_index.add_country(country)
         if footnote_index is not None:
@@ -533,20 +444,9 @@ def _extract_footnotes(label: str) -> list[str]:
     footnotes = [_normalize_footnote(match) for match in PAREN_RE.findall(label)]
     normalized_notes = [note for note in footnotes if note]
     if not normalized_notes and label.endswith("(r)"):
-        return ["reexports"]
-    if any(note == "r" for note in normalized_notes):
-        return ["reexports" if note == "r" else note for note in normalized_notes]
-    return normalized_notes
-
-
-def _extract_country_and_footnotes(
-    label: str,
-    footnotes: list[str] | None = None,
-) -> tuple[str, str]:
-    """Split a row label into country name and semicolon-separated footnotes."""
-    country = PAREN_RE.sub("", label).strip()
-    country = _strip_terminal_punctuation(country)
-    normalized_notes = footnotes if footnotes is not None else _extract_footnotes(label)
+        normalized_notes = ["reexports"]
+    elif any(note == "r" for note in normalized_notes):
+        normalized_notes = ["reexports" if note == "r" else note for note in normalized_notes]
     return country, "; ".join(normalized_notes)
 
 
