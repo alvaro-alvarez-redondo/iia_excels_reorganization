@@ -111,7 +111,9 @@ RAW_CONTINENT_LABELS = (
     "OCRANIE",
     "OCRANIE.",
 )
-KNOWN_CONTINENTS = {_normalize_known_geography_label(label) for label in RAW_CONTINENT_LABELS}
+KNOWN_CONTINENTS = {
+    _normalize_known_geography_label(label) for label in RAW_CONTINENT_LABELS
+}
 
 RAW_HEMISPHERE_LABELS = (
     "HÉMISHPÈRE SEPTENTRIONAL",
@@ -132,7 +134,9 @@ RAW_HEMISPHERE_LABELS = (
     "HÉMISPHÈRE SUD",
     "HÉMISPHÈRE SUDAFRIQUE.",
 )
-KNOWN_HEMISPHERES = {_normalize_known_geography_label(label) for label in RAW_HEMISPHERE_LABELS}
+KNOWN_HEMISPHERES = {
+    _normalize_known_geography_label(label) for label in RAW_HEMISPHERE_LABELS
+}
 
 
 class TransformationError(RuntimeError):
@@ -163,7 +167,7 @@ class GeographyIndex:
             self.hemispheres.add(value)
 
     def write_txt(self, path: str | Path) -> Path:
-        """Write sorted geography labels to *path* in an INI-like text format."""
+        """Write all geography labels to *path* in the legacy combined format."""
         output_path = Path(path)
         sections = {
             "hemispheres": sorted(self.hemispheres),
@@ -175,6 +179,40 @@ class GeographyIndex:
             output_lines.extend([f"[{label}]", *values, ""])
         output_path.write_text("\n".join(output_lines), encoding="utf-8")
         return output_path
+
+    def write_dimension_txt(self, path: str | Path, *, label: str) -> Path:
+        """Write one geography dimension to *path* in a deduplicated TXT format."""
+        output_path = Path(path)
+        values_by_label = {
+            "hemispheres": self.hemispheres,
+            "continents": self.continents,
+            "countries": self.countries,
+        }
+        values = values_by_label[label]
+        output_path.write_text(
+            "\n".join([f"[{label}]", *sorted(values), ""]),
+            encoding="utf-8",
+        )
+        return output_path
+
+    def write_split_txts(self, directory: str | Path) -> list[Path]:
+        """Write separate deduplicated TXT files for each geography dimension."""
+        output_dir = Path(directory)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        return [
+            self.write_dimension_txt(
+                output_dir / "unique_hemisphere_values.txt",
+                label="hemispheres",
+            ),
+            self.write_dimension_txt(
+                output_dir / "unique_continent_values.txt",
+                label="continents",
+            ),
+            self.write_dimension_txt(
+                output_dir / "unique_country_values.txt",
+                label="countries",
+            ),
+        ]
 
 
 @dataclass(slots=True)
@@ -198,11 +236,76 @@ class ProductIndex:
         return output_path
 
 
+@dataclass(slots=True)
+class FootnoteIndex:
+    """Accumulate unique normalized footnotes seen across transformed workbooks."""
+
+    footnotes: set[str] = field(default_factory=set)
+
+    def add_footnotes(self, values: list[str]) -> None:
+        """Add non-empty normalized footnotes from *values*."""
+        self.footnotes.update(value for value in values if value)
+
+    def write_txt(self, path: str | Path) -> Path:
+        """Write sorted unique footnotes to *path* in an INI-like text format."""
+        output_path = Path(path)
+        output_path.write_text(
+            "\n".join(["[footnotes]", *sorted(self.footnotes), ""]),
+            encoding="utf-8",
+        )
+        return output_path
+
+
+@dataclass(slots=True)
+class DocumentIndex:
+    """Track all transformed document names."""
+
+    documents: set[str] = field(default_factory=set)
+
+    def add_document(self, value: str) -> None:
+        """Add *value* when non-empty."""
+        if value:
+            self.documents.add(value)
+
+    def write_txt(self, path: str | Path) -> Path:
+        """Write sorted transformed document names to *path*."""
+        output_path = Path(path)
+        output_path.write_text(
+            "\n".join(["[documents]", *sorted(self.documents), ""]),
+            encoding="utf-8",
+        )
+        return output_path
+
+
+@dataclass(slots=True)
+class UnitFootnoteDocumentIndex:
+    """Track transformed document names whose footnotes reference units."""
+
+    documents: set[str] = field(default_factory=set)
+
+    def add_document(self, value: str) -> None:
+        """Add *value* when a transformed document contains unit-related footnotes."""
+        if value:
+            self.documents.add(value)
+
+    def write_txt(self, path: str | Path) -> Path:
+        """Write transformed document names with unit-related footnotes to *path*."""
+        output_path = Path(path)
+        output_path.write_text(
+            "\n".join(["[documents]", *sorted(self.documents), ""]),
+            encoding="utf-8",
+        )
+        return output_path
+
+
 def transform_workbook(
     input_path: str | Path,
     output_path: str | Path,
     config: WorkbookConfig | None = None,
     geography_index: GeographyIndex | None = None,
+    document_index: DocumentIndex | None = None,
+    footnote_index: FootnoteIndex | None = None,
+    unit_footnote_document_index: UnitFootnoteDocumentIndex | None = None,
 ) -> Path:
     """Read *input_path*, transform each eligible sheet, and write to *output_path*."""
     workbook_config = config or WorkbookConfig()
@@ -212,6 +315,8 @@ def transform_workbook(
     product = workbook_config.product_for_document(source_path)
     category = workbook_config.category_for_document(source_path)
 
+    has_unit_related_footnotes = False
+
     for source_sheet in source_workbook.sheets:
         if not workbook_config.should_include_sheet(source_sheet.name):
             continue
@@ -220,19 +325,24 @@ def transform_workbook(
         if not years:
             continue
 
-        unit = workbook_config.override_for(source_path, source_sheet.name) or assign_unit(
+        unit = workbook_config.override_for(
+            source_path, source_sheet.name
+        ) or assign_unit(
             variable=source_sheet.name,
             product=product,
             category=category,
             mode=workbook_config.unit_mode,
         )
-        target_sheets.append(
-            _transform_sheet(
-                source_sheet=source_sheet,
-                years=years,
-                unit=unit,
-                geography_index=geography_index,
-            )
+        transformed_sheet, sheet_has_unit_related_footnotes = _transform_sheet(
+            source_sheet=source_sheet,
+            years=years,
+            unit=unit,
+            geography_index=geography_index,
+            footnote_index=footnote_index,
+        )
+        target_sheets.append(transformed_sheet)
+        has_unit_related_footnotes = (
+            has_unit_related_footnotes or sheet_has_unit_related_footnotes
         )
 
     if not target_sheets:
@@ -240,7 +350,14 @@ def transform_workbook(
             f"No transformable sheets found in workbook: {source_path.name}"
         )
 
-    return write_workbook(output_path, WorkbookData(sheets=target_sheets))
+    written_output_path = write_workbook(
+        output_path, WorkbookData(sheets=target_sheets)
+    )
+    if document_index is not None:
+        document_index.add_document(written_output_path.name)
+    if has_unit_related_footnotes and unit_footnote_document_index is not None:
+        unit_footnote_document_index.add_document(written_output_path.name)
+    return written_output_path
 
 
 def _extract_year_headers(sheet: SheetData) -> list[HeaderYear]:
@@ -257,20 +374,29 @@ def _transform_sheet(
     years: list[HeaderYear],
     unit: str,
     geography_index: GeographyIndex | None = None,
-) -> SheetData:
+    document_index: DocumentIndex | None = None,
+    footnote_index: FootnoteIndex | None = None,
+) -> tuple[SheetData, bool]:
     """Convert one source sheet into the standardized long-format layout."""
     target_sheet = SheetData(name=source_sheet.name.lower())
     _write_headers(target_sheet, years)
 
+    output_rows, has_unit_related_footnotes = _build_output_rows(
+        source_sheet,
+        years,
+        unit,
+        geography_index,
+        footnote_index,
+    )
     target_row = 2
-    for output_row in _build_output_rows(source_sheet, years, unit, geography_index):
+    for output_row in output_rows:
         if output_row is None:
             target_row += 1
             continue
         target_sheet.set_row(target_row, output_row.values, output_row.fills)
         target_row += 1
 
-    return target_sheet
+    return target_sheet, has_unit_related_footnotes
 
 
 def _write_headers(target: SheetData, years: list[HeaderYear]) -> None:
@@ -284,9 +410,11 @@ def _build_output_rows(
     years: list[HeaderYear],
     unit: str,
     geography_index: GeographyIndex | None,
-) -> list[OutputRow | None]:
+    footnote_index: FootnoteIndex | None,
+) -> tuple[list[OutputRow | None], bool]:
     """Build normalized output rows before materializing the target worksheet."""
     output_rows: list[OutputRow | None] = []
+    has_unit_related_footnotes = False
     current_hemisphere = ""
     current_hemisphere_fill: str | None = None
     current_continent = ""
@@ -314,9 +442,15 @@ def _build_output_rows(
                 geography_index.add_continent(current_continent)
             continue
 
-        country, footnotes = _extract_country_and_footnotes(label)
+        footnote_values = _extract_footnotes(label)
+        country, footnotes = _extract_country_and_footnotes(label, footnote_values)
+        has_unit_related_footnotes = (
+            has_unit_related_footnotes or _has_unit_related_footnote(footnotes)
+        )
         if geography_index is not None:
             geography_index.add_country(country)
+        if footnote_index is not None:
+            footnote_index.add_footnotes(footnote_values)
         output_rows.append(
             _build_output_row(
                 source_sheet=source_sheet,
@@ -333,7 +467,7 @@ def _build_output_rows(
             )
         )
 
-    return output_rows
+    return output_rows, has_unit_related_footnotes
 
 
 def _build_output_row(
@@ -376,21 +510,43 @@ def _strip_terminal_punctuation(value: str) -> str:
     return value.rstrip().rstrip(".:")
 
 
+_UNIT_FOOTNOTE_RE = re.compile(
+    r"\b(?:unit|units|tonne|tonnes|kg|kilogram|kilograms|q|quintal|quintals|"
+    r"ha|hectare|hectares|hl|hectoliter|hectoliters|head|heads|egg|eggs|"
+    r"hg)\b",
+    re.IGNORECASE,
+)
+
+
+def _has_unit_related_footnote(value: str) -> bool:
+    """Return whether *value* mentions a measurement unit or unit hint."""
+    return bool(_UNIT_FOOTNOTE_RE.search(value))
+
+
 def _normalize_footnote(value: str) -> str:
     """Normalize extracted footnote text for output."""
     return re.sub(r"\s+", " ", value.strip(" .;,")).strip()
 
 
-def _extract_country_and_footnotes(label: str) -> tuple[str, str]:
-    """Split a row label into country name and semicolon-separated footnotes."""
+def _extract_footnotes(label: str) -> list[str]:
+    """Return normalized footnotes extracted from *label*."""
     footnotes = [_normalize_footnote(match) for match in PAREN_RE.findall(label)]
-    country = PAREN_RE.sub("", label).strip()
-    country = _strip_terminal_punctuation(country)
     normalized_notes = [note for note in footnotes if note]
     if not normalized_notes and label.endswith("(r)"):
-        normalized_notes = ["reexports"]
-    elif any(note == "r" for note in normalized_notes):
-        normalized_notes = ["reexports" if note == "r" else note for note in normalized_notes]
+        return ["reexports"]
+    if any(note == "r" for note in normalized_notes):
+        return ["reexports" if note == "r" else note for note in normalized_notes]
+    return normalized_notes
+
+
+def _extract_country_and_footnotes(
+    label: str,
+    footnotes: list[str] | None = None,
+) -> tuple[str, str]:
+    """Split a row label into country name and semicolon-separated footnotes."""
+    country = PAREN_RE.sub("", label).strip()
+    country = _strip_terminal_punctuation(country)
+    normalized_notes = footnotes if footnotes is not None else _extract_footnotes(label)
     return country, "; ".join(normalized_notes)
 
 
