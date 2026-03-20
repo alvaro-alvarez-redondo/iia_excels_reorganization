@@ -456,7 +456,8 @@ def _build_output_row(
     footnotes: str,
 ) -> OutputRow:
     """Return one normalized output row for a source data row."""
-    values: list[RowValue] = [hemisphere, continent, country, unit, footnotes]
+    normalized_unit = "" if unit == UNIT_PLACEHOLDER else unit
+    values: list[RowValue] = [hemisphere, continent, country, normalized_unit, footnotes]
     fills: list[str | None] = [
         hemisphere_fill,
         continent_fill,
@@ -466,9 +467,16 @@ def _build_output_row(
     ]
     for source_column, _ in years:
         source_value = source_sheet.get_cell(source_row, source_column)
-        values.append(source_value.value)
+        values.append(_normalize_year_value(source_value.value))
         fills.append(source_value.fill_rgb)
     return OutputRow(values=values, fills=fills)
+
+
+def _normalize_year_value(value: RowValue) -> RowValue:
+    """Normalize OCR-confused characters in year-column values."""
+    if not isinstance(value, str):
+        return value
+    return value.translate(str.maketrans({"i": "1", "I": "1", "o": "0", "O": "0"}))
 
 
 def _clean_text(value: str | int | float | None) -> str:
