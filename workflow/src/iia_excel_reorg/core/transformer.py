@@ -237,24 +237,29 @@ class ProductIndex:
 
 
 @dataclass(slots=True)
-class UnitFootnoteDocumentIndex:
-    """Track transformed document names whose footnotes reference units."""
+class DocumentIndex:
+    """Track transformed document names."""
 
     documents: set[str] = field(default_factory=set)
 
     def add_document(self, value: str) -> None:
-        """Add *value* when a transformed document contains unit-related footnotes."""
+        """Add *value* when non-empty."""
         if value:
             self.documents.add(value)
 
     def write_txt(self, path: str | Path) -> Path:
-        """Write transformed document names with unit-related footnotes to *path*."""
+        """Write sorted transformed document names to *path*."""
         output_path = Path(path)
         output_path.write_text(
             "\n".join(["[documents]", *sorted(self.documents), ""]),
             encoding="utf-8",
         )
         return output_path
+
+
+@dataclass(slots=True)
+class UnitFootnoteDocumentIndex(DocumentIndex):
+    """Track transformed document names whose footnotes reference units."""
 
 
 @dataclass(slots=True)
@@ -275,9 +280,6 @@ class FootnoteIndex:
             encoding="utf-8",
         )
         return output_path
-
-
-DocumentIndex = UnitFootnoteDocumentIndex
 
 
 def transform_workbook(

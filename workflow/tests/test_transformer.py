@@ -302,6 +302,20 @@ def test_extract_footnotes_normalizes_and_deduplicates_index_output(
     )
 
 
+def test_document_index_writes_sorted_unique_documents(tmp_path: Path) -> None:
+    document_index = DocumentIndex()
+    document_index.add_document("b.xlsx")
+    document_index.add_document("a.xlsx")
+    document_index.add_document("b.xlsx")
+
+    index_path = tmp_path / "final_docs.txt"
+    document_index.write_txt(index_path)
+
+    assert index_path.read_text(encoding="utf-8") == "\n".join(
+        ["[documents]", "a.xlsx", "b.xlsx", ""]
+    )
+
+
 def test_transform_workbook_tracks_documents_with_unit_related_footnotes(
     tmp_path: Path,
 ) -> None:
@@ -612,8 +626,14 @@ def test_cli_main_creates_structured_output(
     transformed_files = list(output_subdir.glob("*.xlsx"))
     assert len(transformed_files) == 1
     lists_dir = tmp_path / "lists"
-    assert (lists_dir / "unique_geography_values.txt").is_file()
+    assert (lists_dir / "unique_hemisphere_values.txt").is_file()
+    assert (lists_dir / "unique_continent_values.txt").is_file()
+    assert (lists_dir / "unique_country_values.txt").is_file()
     assert (lists_dir / "unique_product_values.txt").is_file()
+    final_docs_path = lists_dir / "final_docs.txt"
+    assert final_docs_path.read_text(encoding="utf-8") == (
+        "[documents]\n" f"{transformed_files[0].name}\n"
+    )
     unit_docs_path = lists_dir / "final_docs_with_unit_footnotes.txt"
     assert unit_docs_path.read_text(encoding="utf-8") == (
         "[documents]\n" f"{transformed_files[0].name}\n"

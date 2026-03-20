@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Callable, TypeAlias
 from .config import load_config
 from .core.transformer import (
+    DocumentIndex,
     GeographyIndex,
     ProductIndex,
     UnitFootnoteDocumentIndex,
@@ -30,8 +31,8 @@ DEFAULT_OUTPUT_DIR = Path("data/10-raw_imports")
 HEMISPHERE_INDEX_FILENAME = "unique_hemisphere_values.txt"
 CONTINENT_INDEX_FILENAME = "unique_continent_values.txt"
 COUNTRY_INDEX_FILENAME = "unique_country_values.txt"
-GEOGRAPHY_INDEX_FILENAME = "unique_geography_values.txt"
 PRODUCT_INDEX_FILENAME = "unique_product_values.txt"
+FINAL_DOCUMENTS_INDEX_FILENAME = "final_docs.txt"
 UNIT_FOOTNOTE_DOCUMENT_INDEX_FILENAME = "final_docs_with_unit_footnotes.txt"
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 LISTS_DIR = PROJECT_ROOT / "data" / "lists"
@@ -195,6 +196,7 @@ def main() -> None:
         return
     geography_index = GeographyIndex()
     product_index = ProductIndex()
+    document_index = DocumentIndex()
     unit_footnote_document_index = UnitFootnoteDocumentIndex()
 
     def prepare_output(entry: WorkbookEntry) -> None:
@@ -217,6 +219,7 @@ def main() -> None:
             geography_index=geography_index,
             unit_footnote_document_index=unit_footnote_document_index,
         )
+        document_index.add_document(output_path.name)
         product_index.add_product(derive_product_from_document(output_path.name))
 
     _run_progress("Reorganizing folders", workbook_entries, prepare_output)
@@ -225,12 +228,33 @@ def main() -> None:
         "Generating txt lists",
         [
             (
-                GEOGRAPHY_INDEX_FILENAME,
-                lambda: geography_index.write_txt(LISTS_DIR / GEOGRAPHY_INDEX_FILENAME),
+                HEMISPHERE_INDEX_FILENAME,
+                lambda: geography_index.write_dimension_txt(
+                    LISTS_DIR / HEMISPHERE_INDEX_FILENAME,
+                    label="hemispheres",
+                ),
+            ),
+            (
+                CONTINENT_INDEX_FILENAME,
+                lambda: geography_index.write_dimension_txt(
+                    LISTS_DIR / CONTINENT_INDEX_FILENAME,
+                    label="continents",
+                ),
+            ),
+            (
+                COUNTRY_INDEX_FILENAME,
+                lambda: geography_index.write_dimension_txt(
+                    LISTS_DIR / COUNTRY_INDEX_FILENAME,
+                    label="countries",
+                ),
             ),
             (
                 PRODUCT_INDEX_FILENAME,
                 lambda: product_index.write_txt(LISTS_DIR / PRODUCT_INDEX_FILENAME),
+            ),
+            (
+                FINAL_DOCUMENTS_INDEX_FILENAME,
+                lambda: document_index.write_txt(LISTS_DIR / FINAL_DOCUMENTS_INDEX_FILENAME),
             ),
             (
                 UNIT_FOOTNOTE_DOCUMENT_INDEX_FILENAME,
