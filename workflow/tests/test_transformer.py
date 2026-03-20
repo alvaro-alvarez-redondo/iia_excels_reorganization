@@ -21,6 +21,7 @@ from iia_excel_reorg.transformer import (
     GeographyIndex,
     ProductIndex,
     UnitFootnoteDocumentIndex,
+    _extract_footnotes,
     _is_continent_row,
     _is_hemisphere_row,
     transform_workbook,
@@ -297,22 +298,7 @@ def test_extract_footnotes_normalizes_and_deduplicates_index_output(
     footnote_index.write_txt(index_path)
 
     assert index_path.read_text(encoding="utf-8") == "\n".join(
-        [
-            "[hemispheres]",
-            "Hemisphère méridional",
-            "HÉMISPHÈRE SEPTENTRIONAL",
-            "",
-            "[continents]",
-            "Amérique",
-            "EUROPE",
-            "",
-            "[countries]",
-            "Austria",
-            "Belgique-Luxembourg",
-            "Canada",
-            "Germany",
-            "",
-        ]
+        ["[footnotes]", "reexports", "special case", "unit note q", ""]
     )
 
 

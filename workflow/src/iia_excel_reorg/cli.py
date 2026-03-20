@@ -30,6 +30,7 @@ DEFAULT_OUTPUT_DIR = Path("data/10-raw_imports")
 HEMISPHERE_INDEX_FILENAME = "unique_hemisphere_values.txt"
 CONTINENT_INDEX_FILENAME = "unique_continent_values.txt"
 COUNTRY_INDEX_FILENAME = "unique_country_values.txt"
+GEOGRAPHY_INDEX_FILENAME = "unique_geography_values.txt"
 PRODUCT_INDEX_FILENAME = "unique_product_values.txt"
 UNIT_FOOTNOTE_DOCUMENT_INDEX_FILENAME = "final_docs_with_unit_footnotes.txt"
 PROJECT_ROOT = Path(__file__).resolve().parents[3]

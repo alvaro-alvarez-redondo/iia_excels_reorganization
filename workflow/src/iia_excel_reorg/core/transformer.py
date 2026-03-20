@@ -257,6 +257,29 @@ class UnitFootnoteDocumentIndex:
         return output_path
 
 
+@dataclass(slots=True)
+class FootnoteIndex:
+    """Accumulate unique normalized footnotes."""
+
+    footnotes: set[str] = field(default_factory=set)
+
+    def add_footnotes(self, values: list[str]) -> None:
+        """Add all non-empty footnotes from *values*."""
+        self.footnotes.update(value for value in values if value)
+
+    def write_txt(self, path: str | Path) -> Path:
+        """Write sorted footnotes to *path*."""
+        output_path = Path(path)
+        output_path.write_text(
+            "\n".join(["[footnotes]", *sorted(self.footnotes), ""]),
+            encoding="utf-8",
+        )
+        return output_path
+
+
+DocumentIndex = UnitFootnoteDocumentIndex
+
+
 def transform_workbook(
     input_path: str | Path,
     output_path: str | Path,
@@ -361,6 +384,7 @@ def _build_output_rows(
     years: list[HeaderYear],
     unit: str,
     geography_index: GeographyIndex | None,
+    footnote_index: FootnoteIndex | None = None,
 ) -> tuple[list[OutputRow | None], bool]:
     """Build normalized output rows before materializing the target worksheet."""
     output_rows: list[OutputRow | None] = []
@@ -392,8 +416,8 @@ def _build_output_rows(
                 geography_index.add_continent(current_continent)
             continue
 
-        country = _extract_country(label)
-        footnotes = "; ".join(footnote_values)
+        country, footnotes = _extract_country_and_footnotes(label)
+        footnote_values = _extract_footnotes(label)
         has_unit_related_footnotes = (
             has_unit_related_footnotes or _has_unit_related_footnote(footnotes)
         )
@@ -488,7 +512,18 @@ def _extract_footnotes(label: str) -> list[str]:
         normalized_notes = [
             "reexports" if note == "r" else note for note in normalized_notes
         ]
-    return country, "; ".join(normalized_notes)
+    return normalized_notes
+
+
+def _extract_country(label: str) -> str:
+    """Return the country/component label with parenthesized footnotes removed."""
+    return _clean_text(PAREN_RE.sub("", label)).rstrip()
+
+
+def _extract_country_and_footnotes(label: str) -> tuple[str, str]:
+    """Return the normalized country label and joined footnotes for *label*."""
+    country = _extract_country(label)
+    return country, "; ".join(_extract_footnotes(label))
 
 
 def _stringify_header(value: str | int | float | None) -> str:
