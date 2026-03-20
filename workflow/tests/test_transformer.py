@@ -101,6 +101,19 @@ def _build_numeric_year_workbook(path: Path) -> None:
     write_workbook(path, WorkbookData(sheets=[area]))
 
 
+def _build_ocr_year_values_workbook(path: Path) -> None:
+    """Build a workbook with OCR-like i/o substitutions in year columns."""
+    area = SheetData(name="AREA")
+    area.set_cell(1, 2, "1900")
+    area.set_cell(1, 3, "1901")
+    area.set_cell(2, 1, "HÉMISPHÈRE SEPTENTRIONAL")
+    area.set_cell(3, 1, "EUROPE")
+    area.set_cell(4, 1, "Austria")
+    area.set_cell(4, 2, "IoiO")
+    area.set_cell(4, 3, "bio")
+    write_workbook(path, WorkbookData(sheets=[area]))
+
+
 def _build_multi_continent_workbook(path: Path) -> None:
     """Build a workbook spanning multiple continents to test spacer-row logic."""
     area = SheetData(name="AREA")
@@ -183,7 +196,7 @@ def test_transform_workbook_assigns_units_from_rules_and_preserves_notes(
     assert area.get_cell(2, 1).value == "HÉMISPHÈRE SEPTENTRIONAL"
     assert area.get_cell(2, 2).value == "EUROPE"
     assert area.get_cell(2, 3).value == "Belgique-Luxembourg"
-    assert area.get_cell(2, 4).value == "__NA_UNIT__"
+    assert area.get_cell(2, 4).value == ""
     assert area.get_cell(2, 5).value == "reexports; special case"
     assert area.get_cell(2, 6).value == 17268
     assert area.get_cell(2, 7).value == 11887
@@ -199,7 +212,7 @@ def test_transform_workbook_assigns_units_from_rules_and_preserves_notes(
     assert production.get_cell(2, 1).value == "Hemisphère méridional"
     assert production.get_cell(2, 2).value == "Amérique"
     assert production.get_cell(2, 3).value == "Canada"
-    assert production.get_cell(2, 4).value == "__NA_UNIT__"
+    assert production.get_cell(2, 4).value == ""
     assert production.get_cell(2, 6).value == 194876
     assert production.get_cell(2, 7).value == 315569
 
@@ -227,6 +240,24 @@ def test_transform_workbook_preserves_group_colors_and_normalizes_numeric_year_h
     assert area.get_cell(2, 4).fill_rgb is None
     assert area.get_cell(2, 5).fill_rgb is None
     assert area.get_cell(2, 5).value == "reexports"
+
+
+def test_transform_workbook_normalizes_ocr_like_year_values(tmp_path: Path) -> None:
+    source_path = tmp_path / "r_iia_trade_1950_1_1_wheat.xlsx"
+    output_path = tmp_path / "standardized.xlsx"
+    _build_ocr_year_values_workbook(source_path)
+
+    config_path = _write_config(
+        tmp_path / "config.yml",
+        _standard_config_lines("r_iia_trade_1950_1_1_wheat"),
+    )
+
+    transform_workbook(source_path, output_path, config=load_config(config_path))
+
+    result = read_workbook(output_path)
+    area = result.sheets[0]
+    assert area.get_cell(2, 6).value == "1010"
+    assert area.get_cell(2, 7).value == "b10"
 
 
 def test_transform_workbook_inserts_blank_row_before_each_new_continent(
@@ -448,7 +479,7 @@ def test_transform_workbook_supports_inputs_mode_and_harmonized_output_names(
     imports = result.sheets[2]
     assert imports.name == "imports"
     assert imports.get_cell(2, 3).value == "Austria"
-    assert imports.get_cell(2, 4).value == "__NA_UNIT__"
+    assert imports.get_cell(2, 4).value == ""
     assert imports.get_cell(2, 5).value == "unit note q"
     assert imports.get_cell(2, 6).value == 7.5
     assert imports.get_cell(2, 7).value == 0.2
