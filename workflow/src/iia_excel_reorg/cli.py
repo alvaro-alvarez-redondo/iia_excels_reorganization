@@ -5,6 +5,7 @@ import argparse
 import re
 import shutil
 import sys
+from collections import defaultdict
 from pathlib import Path
 from typing import Callable, TypeAlias
 from .config import load_config
@@ -34,8 +35,39 @@ COUNTRY_INDEX_FILENAME = "unique_country_values.txt"
 PRODUCT_INDEX_FILENAME = "unique_product_values.txt"
 FINAL_DOCUMENTS_INDEX_FILENAME = "final_docs.txt"
 UNIT_FOOTNOTE_DOCUMENT_INDEX_FILENAME = "final_docs_with_unit_footnotes.txt"
+DUPLICATE_ORIGINAL_DOCUMENTS_FILENAME = "duplicated_original_documents.txt"
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 LISTS_DIR = PROJECT_ROOT / "data" / "lists"
+
+
+class DuplicateOriginalDocumentIndex:
+    """Track original source documents that share the same filename."""
+
+    def __init__(self) -> None:
+        self._paths_by_name: dict[str, set[str]] = defaultdict(set)
+
+    def add_document(self, path: Path, *, root: Path) -> None:
+        """Record *path* relative to *root* for duplicate-name reporting."""
+        if path.is_absolute():
+            base_root = root if root.is_dir() else root.parent
+            relative_path = path.relative_to(base_root)
+        else:
+            relative_path = path
+        self._paths_by_name[path.name].add(relative_path.as_posix())
+
+    def write_txt(self, path: str | Path) -> Path:
+        """Write only duplicated original document names and their folders to *path*."""
+        output_path = Path(path)
+        lines = ["[documents]"]
+        for document_name in sorted(self._paths_by_name):
+            matches = sorted(self._paths_by_name[document_name])
+            if len(matches) < 2:
+                continue
+            lines.append(document_name)
+            lines.extend(f"  {match}" for match in matches)
+            lines.append("")
+        output_path.write_text("\n".join(lines + ([] if lines[-1] == "" else [""])), encoding="utf-8")
+        return output_path
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -197,6 +229,7 @@ def main() -> None:
     geography_index = GeographyIndex()
     product_index = ProductIndex()
     document_index = DocumentIndex()
+    duplicate_original_document_index = DuplicateOriginalDocumentIndex()
     unit_footnote_document_index = UnitFootnoteDocumentIndex()
 
     def prepare_output(entry: WorkbookEntry) -> None:
@@ -208,6 +241,7 @@ def main() -> None:
         """Transform a single workbook and write it into the output tree."""
         workbook_path, output_subdir = entry
         output_dir = output_root / output_subdir
+        duplicate_original_document_index.add_document(workbook_path, root=input_path)
         output_name = (
             f"{sanitize_name(config.canonical_name_for_document(workbook_path))}.xlsx"
         )
@@ -260,6 +294,12 @@ def main() -> None:
                 UNIT_FOOTNOTE_DOCUMENT_INDEX_FILENAME,
                 lambda: unit_footnote_document_index.write_txt(
                     LISTS_DIR / UNIT_FOOTNOTE_DOCUMENT_INDEX_FILENAME
+                ),
+            ),
+            (
+                DUPLICATE_ORIGINAL_DOCUMENTS_FILENAME,
+                lambda: duplicate_original_document_index.write_txt(
+                    LISTS_DIR / DUPLICATE_ORIGINAL_DOCUMENTS_FILENAME
                 ),
             ),
         ],

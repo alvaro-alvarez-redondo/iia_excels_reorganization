@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from iia_excel_reorg.cli import (
+    DuplicateOriginalDocumentIndex,
     _compute_output_subdir,
     _ensure_workspace,
     _iter_workbooks_structured,
@@ -563,6 +564,38 @@ def test_compute_output_subdir_without_extracted_pages() -> None:
     assert _compute_output_subdir(path) == Path(".")
 
 
+def test_duplicate_original_document_index_lists_only_duplicate_names(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "inputs"
+    first = root / "reviewed_iia" / "extracted_pages_1929_30" / "crops" / "same.xlsx"
+    second = root / "reviewed_iia" / "extracted_pages_1938_39" / "trade" / "same.xlsx"
+    third = root / "reviewed_iia" / "extracted_pages_1938_39" / "trade" / "other.xlsx"
+    first.parent.mkdir(parents=True)
+    second.parent.mkdir(parents=True, exist_ok=True)
+    first.write_text("a", encoding="utf-8")
+    second.write_text("b", encoding="utf-8")
+    third.write_text("c", encoding="utf-8")
+
+    index = DuplicateOriginalDocumentIndex()
+    index.add_document(first, root=root)
+    index.add_document(second, root=root)
+    index.add_document(third, root=root)
+
+    output_path = tmp_path / "duplicated_original_documents.txt"
+    index.write_txt(output_path)
+
+    assert output_path.read_text(encoding="utf-8") == "\n".join(
+        [
+            "[documents]",
+            "same.xlsx",
+            "  reviewed_iia/extracted_pages_1929_30/crops/same.xlsx",
+            "  reviewed_iia/extracted_pages_1938_39/trade/same.xlsx",
+            "",
+        ]
+    )
+
+
 def test_iter_workbooks_structured_builds_correct_hierarchy(tmp_path: Path) -> None:
     crops_dir = tmp_path / "reviewed_iia" / "extracted_pages_1929_30" / "crops"
     trade_dir = tmp_path / "reviewed_iia" / "extracted_pages_1938_39" / "trade"
@@ -638,6 +671,8 @@ def test_cli_main_creates_structured_output(
     assert unit_docs_path.read_text(encoding="utf-8") == (
         "[documents]\n" f"{transformed_files[0].name}\n"
     )
+    duplicate_original_docs_path = lists_dir / "duplicated_original_documents.txt"
+    assert duplicate_original_docs_path.read_text(encoding="utf-8") == "[documents]\n"
     captured = capsys.readouterr()
     assert "Generating txt lists" in captured.out
 
@@ -648,3 +683,56 @@ def test_ensure_workspace_creates_missing_input_and_output_dirs(tmp_path: Path) 
     _ensure_workspace(input_dir, output_dir)
     assert input_dir.is_dir()
     assert output_dir.is_dir()
+
+
+def test_cli_main_lists_duplicate_original_documents(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    import iia_excel_reorg.cli as cli
+
+    monkeypatch.setattr(cli, "LISTS_DIR", tmp_path / "lists")
+    main = cli.main
+
+    crops_dir = (
+        tmp_path / "inputs" / "reviewed_iia" / "extracted_pages_1929_30" / "crops"
+    )
+    trade_dir = (
+        tmp_path / "inputs" / "reviewed_iia" / "extracted_pages_1938_39" / "trade"
+    )
+    crops_dir.mkdir(parents=True)
+    trade_dir.mkdir(parents=True)
+    shared_name = "reviewed_1_2_wheat.xlsx"
+    _build_source_workbook(crops_dir / shared_name)
+    _build_source_workbook(trade_dir / shared_name)
+
+    output_root = tmp_path / "outputs"
+    config_path = _write_config(
+        tmp_path / "config.yml",
+        _standard_config_lines("reviewed_1_2_wheat"),
+    )
+
+    import sys
+
+    original_argv = sys.argv
+    try:
+        sys.argv = [
+            "iia-excel-reorg",
+            str(tmp_path / "inputs"),
+            str(output_root),
+            "--config",
+            str(config_path),
+        ]
+        main()
+    finally:
+        sys.argv = original_argv
+
+    duplicate_original_docs_path = tmp_path / "lists" / "duplicated_original_documents.txt"
+    assert duplicate_original_docs_path.read_text(encoding="utf-8") == "\n".join(
+        [
+            "[documents]",
+            shared_name,
+            "  reviewed_iia/extracted_pages_1929_30/crops/reviewed_1_2_wheat.xlsx",
+            "  reviewed_iia/extracted_pages_1938_39/trade/reviewed_1_2_wheat.xlsx",
+            "",
+        ]
+    )
