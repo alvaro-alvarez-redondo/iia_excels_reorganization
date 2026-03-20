@@ -18,12 +18,18 @@ from iia_excel_reorg.naming import (
 from iia_excel_reorg.transformer import (
     GeographyIndex,
     ProductIndex,
+    UnitFootnoteDocumentIndex,
     _is_continent_row,
     _is_hemisphere_row,
     transform_workbook,
 )
 from iia_excel_reorg.unit_rules import assign_unit
-from iia_excel_reorg.xlsx_io import SheetData, WorkbookData, read_workbook, write_workbook
+from iia_excel_reorg.xlsx_io import (
+    SheetData,
+    WorkbookData,
+    read_workbook,
+    write_workbook,
+)
 
 GREEN = "FF00FF00"
 YELLOW = "FFFFFF00"
@@ -105,7 +111,9 @@ def _build_multi_continent_workbook(path: Path) -> None:
     write_workbook(path, WorkbookData(sheets=[area]))
 
 
-def _standard_config_lines(document_name: str, *, unit_mode: str = "standard") -> list[str]:
+def _standard_config_lines(
+    document_name: str, *, unit_mode: str = "standard"
+) -> list[str]:
     """Return common test config lines for a single workbook category."""
     return [
         f"unit_mode: {unit_mode}",
@@ -280,6 +288,31 @@ def test_transform_workbook_collects_unique_geography_labels(tmp_path: Path) -> 
     )
 
 
+def test_transform_workbook_tracks_documents_with_unit_related_footnotes(
+    tmp_path: Path,
+) -> None:
+    source_path = tmp_path / "r_iia_trade_1950_3_5_wheat.xlsx"
+    output_path = tmp_path / "standardized.xlsx"
+    _build_source_workbook(source_path, include_imports=True)
+    unit_footnote_document_index = UnitFootnoteDocumentIndex()
+
+    config_path = _write_config(
+        tmp_path / "config.yml",
+        _standard_config_lines("r_iia_trade_1950_3_5_wheat"),
+    )
+
+    transform_workbook(
+        source_path,
+        output_path,
+        config=load_config(config_path),
+        unit_footnote_document_index=unit_footnote_document_index,
+    )
+
+    assert unit_footnote_document_index.documents == {"standardized.xlsx"}
+    txt_path = unit_footnote_document_index.write_txt(tmp_path / "unit_footnotes.txt")
+    assert txt_path.read_text(encoding="utf-8") == "[documents]\nstandardized.xlsx\n"
+
+
 def test_product_index_writes_sorted_unique_products(tmp_path: Path) -> None:
     product_index = ProductIndex()
     product_index.add_product("rice")
@@ -344,11 +377,14 @@ def test_canonical_document_name_auto_translates_unknown_products(
 def test_canonical_document_name_applies_alias_before_translation() -> None:
     path = Path("raw_inputs/trade/extracted_pages_1938_39/reviewed_12_13teaimp.xlsx")
 
-    assert canonical_document_name(
-        path,
-        product_translations={"te": "tea"},
-        product_aliases={"tea": "te"},
-    ) == "r_iia_trade_1938_12_13_tea"
+    assert (
+        canonical_document_name(
+            path,
+            product_translations={"te": "tea"},
+            product_aliases={"tea": "te"},
+        )
+        == "r_iia_trade_1938_12_13_tea"
+    )
 
 
 def test_naming_and_unit_rules_cover_reviewed_documents() -> None:
@@ -362,10 +398,13 @@ def test_naming_and_unit_rules_cover_reviewed_documents() -> None:
         "year": "1938",
     }
     assert extract_source_product(path) == "azucar cana bruta"
-    assert canonical_document_name(
-        path,
-        product_translations={"azucar cana bruta": "raw cane sugar"},
-    ) == "r_iia_trade_1938_239_239_raw_cane_sugar"
+    assert (
+        canonical_document_name(
+            path,
+            product_translations={"azucar cana bruta": "raw cane sugar"},
+        )
+        == "r_iia_trade_1938_239_239_raw_cane_sugar"
+    )
     assert assign_unit("imports", "te", 1) == "tonnes"
     assert assign_unit("imports", "te", 2) == "q"
     assert assign_unit("production", "vino", 1) == "1000 hl"
@@ -517,14 +556,21 @@ def test_iter_workbooks_structured_builds_correct_hierarchy(tmp_path: Path) -> N
     )
 
 
-def test_cli_main_creates_structured_output(tmp_path: Path) -> None:
+def test_cli_main_creates_structured_output(
+    tmp_path: Path, monkeypatch: Any, capsys: Any
+) -> None:
     """End-to-end: main() populates the structured output hierarchy."""
-    from iia_excel_reorg.cli import main
+    import iia_excel_reorg.cli as cli
 
-    crops_dir = tmp_path / "inputs" / "reviewed_iia" / "extracted_pages_1929_30" / "crops"
+    monkeypatch.setattr(cli, "LISTS_DIR", tmp_path / "lists")
+    main = cli.main
+
+    crops_dir = (
+        tmp_path / "inputs" / "reviewed_iia" / "extracted_pages_1929_30" / "crops"
+    )
     crops_dir.mkdir(parents=True)
     source = crops_dir / "reviewed_1_2_wheat.xlsx"
-    _build_source_workbook(source)
+    _build_source_workbook(source, include_imports=True)
 
     output_root = tmp_path / "outputs"
     config_path = _write_config(
@@ -549,7 +595,17 @@ def test_cli_main_creates_structured_output(tmp_path: Path) -> None:
 
     output_subdir = output_root / "iia_extracted_pages_1929" / "iia_crops_1929"
     assert output_subdir.is_dir()
-    assert len(list(output_subdir.glob("*.xlsx"))) == 1
+    transformed_files = list(output_subdir.glob("*.xlsx"))
+    assert len(transformed_files) == 1
+    lists_dir = tmp_path / "lists"
+    assert (lists_dir / "unique_geography_values.txt").is_file()
+    assert (lists_dir / "unique_product_values.txt").is_file()
+    unit_docs_path = lists_dir / "final_docs_with_unit_footnotes.txt"
+    assert unit_docs_path.read_text(encoding="utf-8") == (
+        "[documents]\n" f"{transformed_files[0].name}\n"
+    )
+    captured = capsys.readouterr()
+    assert "Generating txt lists" in captured.out
 
 
 def test_ensure_workspace_creates_missing_input_and_output_dirs(tmp_path: Path) -> None:
