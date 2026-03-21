@@ -20,6 +20,7 @@ from iia_excel_reorg.transformer import (
     DocumentIndex,
     FootnoteIndex,
     GeographyIndex,
+    MissingUnitCountryDocumentIndex,
     ProductIndex,
     UnitFootnoteDocumentIndex,
     _extract_footnotes,
@@ -469,6 +470,99 @@ def test_transform_workbook_tracks_documents_with_unit_related_footnotes(
     assert txt_path.read_text(encoding="utf-8") == "[documents]\nstandardized.xlsx\n"
 
 
+def test_transform_workbook_tracks_documents_with_countries_missing_units(
+    tmp_path: Path,
+) -> None:
+    source_path = tmp_path / "r_iia_trade_1950_3_5_wheat.xlsx"
+    output_path = tmp_path / "standardized.xlsx"
+    _build_source_workbook(source_path, include_imports=True)
+    missing_unit_country_document_index = MissingUnitCountryDocumentIndex()
+
+    config_path = _write_config(
+        tmp_path / "config.yml",
+        _standard_config_lines("r_iia_trade_1950_3_5_wheat"),
+    )
+
+    transform_workbook(
+        source_path,
+        output_path,
+        config=load_config(config_path),
+        missing_unit_country_document_index=missing_unit_country_document_index,
+    )
+
+    assert missing_unit_country_document_index.documents == {"standardized.xlsx"}
+    txt_path = missing_unit_country_document_index.write_txt(
+        tmp_path / "missing_country_units.txt"
+    )
+    assert txt_path.read_text(encoding="utf-8") == "[documents]\nstandardized.xlsx\n"
+
+
+def test_transform_workbook_treats_na_like_units_as_missing(
+    tmp_path: Path,
+) -> None:
+    source_path = tmp_path / "reviewed_10_20wheat.xlsx"
+    output_path = tmp_path / "standardized.xlsx"
+    _build_source_workbook(source_path)
+    missing_unit_country_document_index = MissingUnitCountryDocumentIndex()
+
+    config_path = _write_config(
+        tmp_path / "config.yml",
+        [
+            "unit_mode: standard",
+            "unit_overrides:",
+            "  area: N/A",
+            "  production: tonnes",
+        ],
+    )
+
+    transform_workbook(
+        source_path,
+        output_path,
+        config=load_config(config_path),
+        missing_unit_country_document_index=missing_unit_country_document_index,
+    )
+
+    result = read_workbook(output_path)
+    area = result.sheets[0]
+    production = result.sheets[1]
+    assert area.get_cell(2, 4).value == ""
+    assert production.get_cell(2, 4).value == "tonnes"
+    assert missing_unit_country_document_index.documents == {"standardized.xlsx"}
+
+
+def test_transform_workbook_indexes_missing_units_even_with_blank_country_cell(
+    tmp_path: Path,
+) -> None:
+    source_path = tmp_path / "r_iia_trade_1950_3_5_wheat.xlsx"
+    output_path = tmp_path / "standardized.xlsx"
+    area = SheetData(name="AREA")
+    area.set_cell(1, 2, "1900")
+    area.set_cell(2, 1, "HÉMISPHÈRE SEPTENTRIONAL")
+    area.set_cell(3, 1, "EUROPE")
+    area.set_cell(4, 1, "(r)")
+    area.set_cell(4, 2, 12)
+    write_workbook(source_path, WorkbookData(sheets=[area]))
+    missing_unit_country_document_index = MissingUnitCountryDocumentIndex()
+
+    config_path = _write_config(
+        tmp_path / "config.yml",
+        _standard_config_lines("r_iia_trade_1950_3_5_wheat"),
+    )
+
+    transform_workbook(
+        source_path,
+        output_path,
+        config=load_config(config_path),
+        missing_unit_country_document_index=missing_unit_country_document_index,
+    )
+
+    result = read_workbook(output_path)
+    transformed_area = result.sheets[0]
+    assert transformed_area.get_cell(2, 3).value == ""
+    assert transformed_area.get_cell(2, 4).value == ""
+    assert missing_unit_country_document_index.documents == {"standardized.xlsx"}
+
+
 def test_product_index_writes_sorted_unique_products(tmp_path: Path) -> None:
     product_index = ProductIndex()
     product_index.add_product("rice")
@@ -790,12 +884,17 @@ def test_cli_main_creates_structured_output(
     assert (lists_dir / "unique_continent_values.txt").is_file()
     assert (lists_dir / "unique_country_values.txt").is_file()
     assert (lists_dir / "unique_product_values.txt").is_file()
+    assert (lists_dir / "final_docs_with_missing_country_units.txt").is_file()
     final_docs_path = lists_dir / "final_docs.txt"
     assert final_docs_path.read_text(encoding="utf-8") == (
         "[documents]\n" f"{transformed_files[0].name}\n"
     )
     unit_docs_path = lists_dir / "final_docs_with_unit_footnotes.txt"
     assert unit_docs_path.read_text(encoding="utf-8") == (
+        "[documents]\n" f"{transformed_files[0].name}\n"
+    )
+    missing_units_docs_path = lists_dir / "final_docs_with_missing_country_units.txt"
+    assert missing_units_docs_path.read_text(encoding="utf-8") == (
         "[documents]\n" f"{transformed_files[0].name}\n"
     )
     duplicate_original_docs_path = lists_dir / "duplicated_original_documents.txt"
