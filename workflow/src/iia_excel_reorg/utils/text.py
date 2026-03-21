@@ -39,6 +39,9 @@ def derive_product_from_document(document_name: str) -> str:
     Tokens after the first 4-digit year token (skipping any following numeric
     tokens) are joined and normalized.  Falls back to the full stem when no
     year token is found.
+
+    Vectorized: the ``while`` loop that skips post-year numeric tokens is
+    replaced by a ``next()`` call over a range generator expression.
     """
     stem = Path(document_name).stem
     tokens = [token for token in stem.split("_") if token]
@@ -52,9 +55,10 @@ def derive_product_from_document(document_name: str) -> str:
     if year_idx is None:
         return normalize_text(stem)
 
-    product_start = year_idx + 1
-    while product_start < len(tokens) and tokens[product_start].isdigit():
-        product_start += 1
+    product_start = next(
+        (i for i in range(year_idx + 1, len(tokens)) if not tokens[i].isdigit()),
+        len(tokens),
+    )
 
     product_tokens = tokens[product_start:] or tokens[-1:]
     return normalize_text(" ".join(product_tokens))

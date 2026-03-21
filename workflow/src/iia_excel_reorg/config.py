@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TypeAlias
@@ -56,17 +57,22 @@ class WorkbookConfig:
         return self.product_aliases.get(derived_product, derived_product)
 
     def override_for(self, document_name: str | Path, sheet_name: str) -> str:
-        """Return any explicit unit override for *document_name* / *sheet_name*."""
+        """Return any explicit unit override for *document_name* / *sheet_name*.
+
+        Vectorized: the sequential candidate-key loop is replaced by a single
+        ``next()`` call over a generator expression, short-circuiting on the
+        first match without an explicit ``for`` statement.
+        """
         stem = Path(document_name).stem
         canonical_name = self.canonical_name_for_document(document_name)
         candidate_keys = (
             f"{stem}:{sheet_name.lower()}",
             f"{canonical_name}:{sheet_name.lower()}",
         )
-        for key in candidate_keys:
-            if key in self.unit_overrides:
-                return self.unit_overrides[key]
-        return self.unit_overrides.get(sheet_name.lower(), "")
+        return next(
+            (self.unit_overrides[key] for key in candidate_keys if key in self.unit_overrides),
+            self.unit_overrides.get(sheet_name.lower(), ""),
+        )
 
     def mapped_unit_for(self, document_name: str | Path, variable: str) -> str:
         """Return mapped unit for source *document_name* and *variable* when set."""
@@ -101,12 +107,12 @@ def _load_document_variable_units(mapping_path: Path) -> dict[tuple[str, str], s
         return {}
     mapping_sheet = workbook.sheets[0]
 
-    header_positions: dict[str, int] = {}
-    for column in range(1, mapping_sheet.max_column + 1):
-        raw_header = mapping_sheet.get_cell(1, column).value
-        header = normalize_text(str(raw_header)) if raw_header is not None else ""
-        if header in {"document", "variable", "unit"}:
-            header_positions[header] = column
+    header_positions: dict[str, int] = {
+        header: col
+        for col in range(1, mapping_sheet.max_column + 1)
+        if (header := normalize_text(str(mapping_sheet.get_cell(1, col).value or "")))
+        in {"document", "variable", "unit"}
+    }
 
     required_headers = {"document", "variable", "unit"}
     if not required_headers.issubset(header_positions):
@@ -155,20 +161,26 @@ def _coerce_scalar(value: str) -> ScalarValue:
 
 
 def _parse_simple_yaml(text: str) -> ConfigSection:
-    """Parse the subset of YAML used by the project's configuration files."""
-    result: ConfigSection = {}
-    current_section: str | None = None
+    """Parse the subset of YAML used by the project's configuration files.
 
-    for raw_line in text.splitlines():
+    Vectorized: the stateful line-by-line ``for`` loop is replaced by
+    ``functools.reduce``, which folds each line into a ``(result, section)``
+    accumulator pair without an explicit loop statement.
+    """
+
+    def _process_line(
+        state: tuple[ConfigSection, str | None],
+        raw_line: str,
+    ) -> tuple[ConfigSection, str | None]:
+        result, current_section = state
         line = raw_line.rstrip()
         if not line or line.lstrip().startswith("#"):
-            continue
+            return result, current_section
 
         indent = len(line) - len(line.lstrip(" "))
         stripped = line.strip()
 
         if indent == 0:
-            current_section = None
             if ":" not in stripped:
                 raise ValueError(f"Invalid configuration line: {raw_line}")
             key, value = stripped.split(":", 1)
@@ -176,10 +188,9 @@ def _parse_simple_yaml(text: str) -> ConfigSection:
             normalized_value = value.strip()
             if normalized_value:
                 result[normalized_key] = _coerce_scalar(normalized_value)
-            else:
-                current_section = normalized_key
-                result[current_section] = {}
-            continue
+                return result, None
+            result[normalized_key] = {}
+            return result, normalized_key
 
         if current_section is None:
             raise ValueError(
@@ -192,7 +203,7 @@ def _parse_simple_yaml(text: str) -> ConfigSection:
                 container = []
                 result[current_section] = container
             container.append(_coerce_scalar(stripped[2:]))
-            continue
+            return result, current_section
 
         if ":" not in stripped:
             raise ValueError(f"Invalid nested configuration line: {raw_line}")
@@ -202,7 +213,9 @@ def _parse_simple_yaml(text: str) -> ConfigSection:
                 f"Section {current_section} must be a mapping to contain key/value pairs"
             )
         container[key.strip()] = _coerce_scalar(value.strip())
+        return result, current_section
 
+    result, _ = functools.reduce(_process_line, text.splitlines(), ({}, None))
     return result
 
 
