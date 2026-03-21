@@ -12,6 +12,7 @@ from .config import load_config
 from .core.transformer import (
     DocumentIndex,
     GeographyIndex,
+    MissingUnitCountryDocumentIndex,
     ProductIndex,
     UnitFootnoteDocumentIndex,
     transform_workbook,
@@ -35,6 +36,9 @@ COUNTRY_INDEX_FILENAME = "unique_country_values.txt"
 PRODUCT_INDEX_FILENAME = "unique_product_values.txt"
 FINAL_DOCUMENTS_INDEX_FILENAME = "final_docs.txt"
 UNIT_FOOTNOTE_DOCUMENT_INDEX_FILENAME = "final_docs_with_unit_footnotes.txt"
+MISSING_UNIT_COUNTRY_DOCUMENT_INDEX_FILENAME = (
+    "final_docs_with_missing_country_units.txt"
+)
 DUPLICATE_ORIGINAL_DOCUMENTS_FILENAME = "duplicated_original_documents.txt"
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 LISTS_DIR = PROJECT_ROOT / "data" / "lists"
@@ -231,6 +235,7 @@ def main() -> None:
     document_index = DocumentIndex()
     duplicate_original_document_index = DuplicateOriginalDocumentIndex()
     unit_footnote_document_index = UnitFootnoteDocumentIndex()
+    missing_unit_country_document_index = MissingUnitCountryDocumentIndex()
 
     def prepare_output(entry: WorkbookEntry) -> None:
         """Create the output subdirectory for *entry* if needed."""
@@ -252,6 +257,7 @@ def main() -> None:
             config=config,
             geography_index=geography_index,
             unit_footnote_document_index=unit_footnote_document_index,
+            missing_unit_country_document_index=missing_unit_country_document_index,
         )
         document_index.add_document(output_path.name)
         product_index.add_product(derive_product_from_document(output_path.name))
@@ -294,6 +300,12 @@ def main() -> None:
                 UNIT_FOOTNOTE_DOCUMENT_INDEX_FILENAME,
                 lambda: unit_footnote_document_index.write_txt(
                     LISTS_DIR / UNIT_FOOTNOTE_DOCUMENT_INDEX_FILENAME
+                ),
+            ),
+            (
+                MISSING_UNIT_COUNTRY_DOCUMENT_INDEX_FILENAME,
+                lambda: missing_unit_country_document_index.write_txt(
+                    LISTS_DIR / MISSING_UNIT_COUNTRY_DOCUMENT_INDEX_FILENAME
                 ),
             ),
             (

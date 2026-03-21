@@ -291,6 +291,11 @@ class UnitFootnoteDocumentIndex(DocumentIndex):
 
 
 @dataclass(slots=True)
+class MissingUnitCountryDocumentIndex(DocumentIndex):
+    """Track transformed documents that contain at least one country with no unit."""
+
+
+@dataclass(slots=True)
 class FootnoteIndex:
     """Accumulate unique normalized footnotes."""
 
@@ -316,6 +321,7 @@ def transform_workbook(
     config: WorkbookConfig | None = None,
     geography_index: GeographyIndex | None = None,
     unit_footnote_document_index: UnitFootnoteDocumentIndex | None = None,
+    missing_unit_country_document_index: MissingUnitCountryDocumentIndex | None = None,
 ) -> Path:
     """Read *input_path*, transform each eligible sheet, and write to *output_path*."""
     workbook_config = config or WorkbookConfig()
@@ -323,6 +329,7 @@ def transform_workbook(
     source_workbook = read_workbook(source_path)
     target_sheets: list[SheetData] = []
     has_unit_related_footnotes = False
+    has_countries_with_missing_units = False
 
     for source_sheet in source_workbook.sheets:
         if not workbook_config.should_include_sheet(source_sheet.name):
@@ -339,7 +346,11 @@ def transform_workbook(
             or UNIT_PLACEHOLDER
         )
 
-        transformed_sheet, sheet_has_unit_related_footnotes = _transform_sheet(
+        (
+            transformed_sheet,
+            sheet_has_unit_related_footnotes,
+            sheet_has_countries_with_missing_units,
+        ) = _transform_sheet(
             source_sheet=source_sheet,
             years=years,
             unit=document_unit,
@@ -348,6 +359,9 @@ def transform_workbook(
         target_sheets.append(transformed_sheet)
         has_unit_related_footnotes = (
             has_unit_related_footnotes or sheet_has_unit_related_footnotes
+        )
+        has_countries_with_missing_units = (
+            has_countries_with_missing_units or sheet_has_countries_with_missing_units
         )
 
     if not target_sheets:
@@ -360,6 +374,11 @@ def transform_workbook(
     )
     if has_unit_related_footnotes and unit_footnote_document_index is not None:
         unit_footnote_document_index.add_document(written_output_path.name)
+    if (
+        has_countries_with_missing_units
+        and missing_unit_country_document_index is not None
+    ):
+        missing_unit_country_document_index.add_document(written_output_path.name)
     return written_output_path
 
 
@@ -377,12 +396,16 @@ def _transform_sheet(
     years: list[HeaderYear],
     unit: str,
     geography_index: GeographyIndex | None = None,
-) -> tuple[SheetData, bool]:
+) -> tuple[SheetData, bool, bool]:
     """Convert one source sheet into the standardized long-format layout."""
     target_sheet = SheetData(name=source_sheet.name.lower())
     _write_headers(target_sheet, years)
 
-    output_rows, has_unit_related_footnotes = _build_output_rows(
+    (
+        output_rows,
+        has_unit_related_footnotes,
+        has_countries_with_missing_units,
+    ) = _build_output_rows(
         source_sheet,
         years,
         unit,
@@ -396,7 +419,7 @@ def _transform_sheet(
         target_sheet.set_row(target_row, output_row.values, output_row.fills)
         target_row += 1
 
-    return target_sheet, has_unit_related_footnotes
+    return target_sheet, has_unit_related_footnotes, has_countries_with_missing_units
 
 
 def _write_headers(target: SheetData, years: list[HeaderYear]) -> None:
@@ -411,10 +434,11 @@ def _build_output_rows(
     unit: str,
     geography_index: GeographyIndex | None,
     footnote_index: FootnoteIndex | None = None,
-) -> tuple[list[OutputRow | None], bool]:
+) -> tuple[list[OutputRow | None], bool, bool]:
     """Build normalized output rows before materializing the target worksheet."""
     output_rows: list[OutputRow | None] = []
     has_unit_related_footnotes = False
+    has_countries_with_missing_units = False
     current_hemisphere = ""
     current_hemisphere_fill: str | None = None
     current_continent = ""
@@ -456,6 +480,8 @@ def _build_output_rows(
         )
         if geography_index is not None:
             geography_index.add_country(country)
+        if _is_missing_unit(unit):
+            has_countries_with_missing_units = True
         if footnote_index is not None:
             footnote_index.add_footnotes(footnote_values)
         output_rows.append(
@@ -474,7 +500,7 @@ def _build_output_rows(
             )
         )
 
-    return output_rows, has_unit_related_footnotes
+    return output_rows, has_unit_related_footnotes, has_countries_with_missing_units
 
 
 def _build_output_row(
@@ -492,7 +518,7 @@ def _build_output_row(
     footnotes: str,
 ) -> OutputRow:
     """Return one normalized output row for a source data row."""
-    normalized_unit = "" if unit == UNIT_PLACEHOLDER else unit
+    normalized_unit = "" if _is_missing_unit(unit) else unit
     values: list[RowValue] = [hemisphere, continent, country, normalized_unit, footnotes]
     fills: list[str | None] = [
         hemisphere_fill,
@@ -530,6 +556,23 @@ def _clean_text(value: str | int | float | None) -> str:
 def _strip_terminal_punctuation(value: str) -> str:
     """Strip terminal periods and colons from *value*."""
     return value.rstrip().rstrip(".:")
+
+
+_MISSING_UNIT_SENTINELS = {
+    "",
+    "__na_unit__",
+    "na",
+    "n/a",
+    "n.a.",
+    "none",
+    "null",
+}
+
+
+def _is_missing_unit(value: str) -> bool:
+    """Return whether *value* should be treated as a missing/unknown unit."""
+    normalized = value.strip().casefold().replace(" ", "")
+    return normalized in _MISSING_UNIT_SENTINELS
 
 
 _UNIT_FOOTNOTE_RE = re.compile(

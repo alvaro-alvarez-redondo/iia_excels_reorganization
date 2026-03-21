@@ -17,6 +17,7 @@ from .core.transformer import (  # noqa: F401
     DocumentIndex,
     FootnoteIndex,
     GeographyIndex,
+    MissingUnitCountryDocumentIndex,
     ProductIndex,
     UnitFootnoteDocumentIndex,
     TransformationError,
