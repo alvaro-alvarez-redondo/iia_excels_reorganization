@@ -113,7 +113,11 @@ def translate_product_name(
 
 
 def extract_source_product(document_path: str | Path) -> str:
-    """Derive the product name embedded in a source Excel filename."""
+    """Derive the product name embedded in a source Excel filename.
+
+    Vectorized: the ``while`` loop that skips post-year numeric tokens is
+    replaced by a ``next()`` call over a range generator expression.
+    """
     stem = Path(document_path).stem
     match = REVIEWED_RE.match(stem)
     if match:
@@ -133,9 +137,10 @@ def extract_source_product(document_path: str | Path) -> str:
     )
     if year_index is None:
         return normalize_text(stem)
-    product_start = year_index + 1
-    while product_start < len(tokens) and tokens[product_start].isdigit():
-        product_start += 1
+    product_start = next(
+        (i for i in range(year_index + 1, len(tokens)) if not tokens[i].isdigit()),
+        len(tokens),
+    )
     return normalize_text(" ".join(tokens[product_start:] or tokens[-1:]))
 
 
@@ -169,16 +174,23 @@ def canonical_document_name(
 
 
 def infer_yearbook_metadata(document_path: str | Path) -> dict[str, str]:
-    """Infer ``agency``, ``yearbook``, and ``year`` from *document_path*."""
+    """Infer ``agency``, ``yearbook``, and ``year`` from *document_path*.
+
+    Vectorized: the sequential ``enumerate`` scan for the ``extracted_pages_*``
+    directory component is replaced by a single ``next()`` call over a generator
+    expression.
+    """
     path = Path(document_path)
-    yearbook = "unknown"
-    year = "unknown"
-    for index, part in enumerate(path.parts):
-        match = EXTRACTED_PAGES_RE.match(part)
-        if match is None:
-            continue
-        year = match.group("year")
-        if index > 0:
-            yearbook = sanitize_name(normalize_text(path.parts[index - 1]))
-        break
+    idx, match = next(
+        (
+            (idx, m)
+            for idx, part in enumerate(path.parts)
+            if (m := EXTRACTED_PAGES_RE.match(part)) is not None
+        ),
+        (None, None),
+    )
+    if match is None:
+        return {"agency": "iia", "yearbook": "unknown", "year": "unknown"}
+    year = match.group("year")
+    yearbook = sanitize_name(normalize_text(path.parts[idx - 1])) if idx > 0 else "unknown"
     return {"agency": "iia", "yearbook": yearbook, "year": year}

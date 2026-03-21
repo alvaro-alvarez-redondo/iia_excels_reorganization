@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 import argparse
+import itertools
 import re
 import shutil
 import sys
-from collections import defaultdict
+import time
+from collections import defaultdict, deque
 from pathlib import Path
 from typing import Callable, TypeAlias
 from .config import load_config
@@ -60,17 +62,25 @@ class DuplicateOriginalDocumentIndex:
         self._paths_by_name[path.name].add(relative_path.as_posix())
 
     def write_txt(self, path: str | Path) -> Path:
-        """Write only duplicated original document names and their folders to *path*."""
+        """Write only duplicated original document names and their folders to *path*.
+
+        Vectorized: the per-document ``append``/``extend`` loop is replaced by
+        ``itertools.chain.from_iterable`` over a filtered generator expression.
+        """
         output_path = Path(path)
-        lines = ["[documents]"]
-        for document_name in sorted(self._paths_by_name):
-            matches = sorted(self._paths_by_name[document_name])
-            if len(matches) < 2:
-                continue
-            lines.append(document_name)
-            lines.extend(f"  {match}" for match in matches)
-            lines.append("")
-        output_path.write_text("\n".join(lines + ([] if lines[-1] == "" else [""])), encoding="utf-8")
+        body = list(
+            itertools.chain.from_iterable(
+                [name, *(f"  {m}" for m in paths), ""]
+                for name in sorted(self._paths_by_name)
+                for paths in (sorted(self._paths_by_name[name]),)
+                if len(paths) >= 2
+            )
+        )
+        lines = ["[documents]", *body]
+        output_path.write_text(
+            "\n".join(lines + ([] if lines[-1] == "" else [""])),
+            encoding="utf-8",
+        )
         return output_path
 
 
@@ -111,24 +121,33 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _compute_output_subdir(workbook_path: Path) -> Path:
-    """Return the relative output subdirectory for *workbook_path*."""
+    """Return the relative output subdirectory for *workbook_path*.
+
+    Vectorized: the sequential ``enumerate`` scan for the ``extracted_pages_*``
+    segment is replaced by a ``next()`` call over a generator expression.
+    """
     parts = workbook_path.parts
-    for idx, part in enumerate(parts):
-        match = _EXTRACTED_PAGES_RE.match(part)
-        if match is None:
-            continue
-        year = match.group("year")
-        parent_dir = Path(f"iia_extracted_pages_{year}")
-        intermediate = parts[idx + 1 : -1]
-        if intermediate:
-            child_dir = sanitize_name(f"iia_{intermediate[0]}_{year}")
-            return parent_dir / child_dir
-        if idx > 0:
-            topic = parts[idx - 1]
-            child_dir = sanitize_name(f"iia_{topic}_{year}")
-            return parent_dir / child_dir
-        return parent_dir
-    return Path(".")
+    idx, match = next(
+        (
+            (idx, m)
+            for idx, part in enumerate(parts)
+            if (m := _EXTRACTED_PAGES_RE.match(part)) is not None
+        ),
+        (None, None),
+    )
+    if match is None:
+        return Path(".")
+    year = match.group("year")
+    parent_dir = Path(f"iia_extracted_pages_{year}")
+    intermediate = parts[idx + 1 : -1]
+    if intermediate:
+        child_dir = sanitize_name(f"iia_{intermediate[0]}_{year}")
+        return parent_dir / child_dir
+    if idx > 0:
+        topic = parts[idx - 1]
+        child_dir = sanitize_name(f"iia_{topic}_{year}")
+        return parent_dir / child_dir
+    return parent_dir
 
 
 def _iter_workbooks(path: Path) -> list[Path]:
@@ -184,31 +203,48 @@ def _run_progress(
     items: list[WorkbookEntry],
     action: WorkbookAction,
 ) -> None:
-    """Run *action* on each item in *items* while updating a progress bar."""
+    """Run *action* on each item in *items* while updating a progress bar.
+
+    Vectorized: the sequential ``for`` loop is replaced by a ``map``-driven
+    side-effect pipeline consumed through ``collections.deque``.
+    """
     total = len(items)
     sys.stdout.write(_render_progress_bar(label, 0, total))
     sys.stdout.flush()
-    for index, item in enumerate(items, start=1):
+
+    def _step(index_item: tuple[int, WorkbookEntry]) -> None:
+        index, item = index_item
         action(item)
         sys.stdout.write("\r" + _render_progress_bar(label, index, total))
         sys.stdout.flush()
+
+    deque(map(_step, enumerate(items, start=1)), maxlen=0)
     print()
 
 
 def _run_txt_progress(label: str, actions: list[tuple[str, TxtAction]]) -> None:
-    """Run TXT generation actions while updating a dedicated progress bar."""
+    """Run TXT generation actions while updating a dedicated progress bar.
+
+    Vectorized: the sequential ``for`` loop is replaced by a ``map``-driven
+    side-effect pipeline consumed through ``collections.deque``.
+    """
     total = len(actions)
     sys.stdout.write(_render_progress_bar(label, 0, total))
     sys.stdout.flush()
-    for index, (_, action) in enumerate(actions, start=1):
+
+    def _step(index_action: tuple[int, tuple[str, TxtAction]]) -> None:
+        index, (_, action) = index_action
         action()
         sys.stdout.write("\r" + _render_progress_bar(label, index, total))
         sys.stdout.flush()
+
+    deque(map(_step, enumerate(actions, start=1)), maxlen=0)
     print()
 
 
 def main() -> None:
     """Entry point for the ``iia-excel-reorg`` command-line tool."""
+    start_time = time.perf_counter()
     parser = build_parser()
     args = parser.parse_args()
     input_path = Path(args.input)
@@ -316,6 +352,8 @@ def main() -> None:
             ),
         ],
     )
+    elapsed = time.perf_counter() - start_time
+    print(f"Done in {elapsed:.2f}s")
 
 
 if __name__ == "__main__":

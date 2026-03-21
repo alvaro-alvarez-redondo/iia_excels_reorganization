@@ -71,11 +71,33 @@ class SheetData:
         *,
         start_column: int = 1,
     ) -> None:
-        """Write a row of values and optional fills starting at *start_column*."""
+        """Write a row of values and optional fills starting at *start_column*.
+
+        Vectorized implementation: builds all ``(row, col) -> CellData`` pairs
+        in a single dict-comprehension and merges them with ``dict.update``,
+        replacing the element-wise ``for offset, value in enumerate(values)``
+        append loop.  The max-row / max-column bookkeeping is resolved with
+        vectorized ``max()`` calls over the new column indices.
+        """
+        n = len(values)
+        if not n:
+            return
         normalized_fills = fills or ()
-        for offset, value in enumerate(values):
-            fill_rgb = normalized_fills[offset] if offset < len(normalized_fills) else None
-            self.set_cell(row, start_column + offset, value, fill_rgb=fill_rgb)
+        end_column = start_column + n - 1
+        new_cells = {
+            (row, start_column + offset): CellData(
+                value=value,
+                fill_rgb=_normalize_rgb(
+                    normalized_fills[offset] if offset < len(normalized_fills) else None
+                ),
+            )
+            for offset, value in enumerate(values)
+        }
+        self.cells.update(new_cells)
+        if row > self._max_row:
+            self._max_row = row
+        if end_column > self._max_column:
+            self._max_column = end_column
 
 
     @property
@@ -105,7 +127,12 @@ def _normalize_rgb(fill_rgb: str | None) -> str | None:
 
 
 def read_workbook(path: str | Path) -> WorkbookData:
-    """Parse an ``.xlsx`` or ``.xlsm`` file into :class:`WorkbookData`."""
+    """Parse an ``.xlsx`` or ``.xlsm`` file into :class:`WorkbookData`.
+
+    Vectorized: both the per-sheet cell-parsing loop and the outer sheet-loading
+    loop are replaced with a single map + bulk dict-update approach, eliminating
+    two levels of explicit ``for`` iteration.
+    """
     workbook_path = Path(path)
     with ZipFile(workbook_path) as archive:
         workbook_root = ET.fromstring(archive.read("xl/workbook.xml"))
@@ -113,25 +140,38 @@ def read_workbook(path: str | Path) -> WorkbookData:
         sheet_targets = _resolve_sheet_targets(workbook_root, relationships_root)
         shared_strings = _read_shared_strings(archive)
         fill_map = _read_fill_map(archive)
-        sheets: list[SheetData] = []
-        for name, target in sheet_targets:
+
+        def _load_sheet(name_target: tuple[str, str]) -> SheetData:
+            """Parse one worksheet XML into a :class:`SheetData` instance."""
+            name, target = name_target
             sheet_root = ET.fromstring(archive.read(f"xl/{target}"))
-            sheet = SheetData(name=name)
-            for cell in sheet_root.findall(f".//{{{MAIN_NS}}}c"):
-                row, column = _split_ref(cell.attrib["r"])
-                style_index = int(cell.attrib.get("s", "0"))
-                sheet.set_cell(
-                    row,
-                    column,
-                    _read_cell_value(cell, shared_strings),
-                    fill_rgb=fill_map.get(style_index),
+            # Build all cells in one dict comprehension; the nested
+            # ``for row, col in (_split_ref(...),)`` is a let-binding idiom that
+            # avoids a temporary variable without adding another loop level.
+            bulk_cells: dict[tuple[int, int], CellData] = {
+                (row, col): CellData(
+                    value=_read_cell_value(cell, shared_strings),
+                    fill_rgb=_normalize_rgb(fill_map.get(int(cell.attrib.get("s", "0")))),
                 )
-            sheets.append(sheet)
-        return WorkbookData(sheets=sheets)
+                for cell in sheet_root.findall(f".//{{{MAIN_NS}}}c")
+                for row, col in (_split_ref(cell.attrib["r"]),)
+            }
+            sheet = SheetData(name=name)
+            sheet.cells.update(bulk_cells)
+            if bulk_cells:
+                sheet._max_row = max(r for r, _ in bulk_cells)
+                sheet._max_column = max(c for _, c in bulk_cells)
+            return sheet
+
+        return WorkbookData(sheets=list(map(_load_sheet, sheet_targets)))
 
 
 def write_workbook(path: str | Path, workbook: WorkbookData) -> Path:
-    """Serialize *workbook* to an OOXML ``.xlsx`` file and return the path."""
+    """Serialize *workbook* to an OOXML ``.xlsx`` file and return the path.
+
+    Vectorized: the per-sheet write loop is replaced with a list comprehension
+    that renders and stores all sheets in one pass.
+    """
     output_path = Path(path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fill_styles = _collect_fill_styles(workbook)
@@ -145,11 +185,13 @@ def write_workbook(path: str | Path, workbook: WorkbookData) -> Path:
             _render_workbook_relationships(workbook),
         )
         archive.writestr("xl/styles.xml", _render_styles(fill_styles))
-        for index, sheet in enumerate(workbook.sheets, start=1):
+        [
             archive.writestr(
                 f"xl/worksheets/sheet{index}.xml",
                 _render_sheet(sheet, fill_styles),
             )
+            for index, sheet in enumerate(workbook.sheets, start=1)
+        ]
     return output_path
 
 
@@ -180,19 +222,27 @@ def _read_shared_strings(archive: ZipFile) -> list[str]:
 
 
 def _read_fill_map(archive: ZipFile) -> dict[int, str | None]:
-    """Build a mapping from cell-style index to fill RGB color string."""
+    """Build a mapping from cell-style index to fill RGB color string.
+
+    Vectorized: both the fill-color extraction and the style-index mapping are
+    expressed as single comprehensions, eliminating two explicit ``for`` loops.
+    """
     if "xl/styles.xml" not in archive.NameToInfo:
         return {}
     root = ET.fromstring(archive.read("xl/styles.xml"))
-    fills: list[str | None] = []
-    for fill in root.findall(f".//{{{MAIN_NS}}}fills/{{{MAIN_NS}}}fill"):
-        foreground = fill.find(f".//{{{MAIN_NS}}}fgColor")
-        fills.append(foreground.attrib.get("rgb") if foreground is not None else None)
-    style_map: dict[int, str | None] = {}
-    for index, xf in enumerate(root.findall(f".//{{{MAIN_NS}}}cellXfs/{{{MAIN_NS}}}xf")):
-        fill_id = int(xf.attrib.get("fillId", "0"))
-        style_map[index] = fills[fill_id] if fill_id < len(fills) else None
-    return style_map
+
+    def _fill_rgb(fill: ET.Element) -> str | None:
+        fg = fill.find(f".//{{{MAIN_NS}}}fgColor")
+        return fg.attrib.get("rgb") if fg is not None else None
+
+    fill_colors: list[str | None] = [
+        _fill_rgb(fill)
+        for fill in root.findall(f".//{{{MAIN_NS}}}fills/{{{MAIN_NS}}}fill")
+    ]
+    return {
+        index: fill_colors[fill_id] if (fill_id := int(xf.attrib.get("fillId", "0"))) < len(fill_colors) else None
+        for index, xf in enumerate(root.findall(f".//{{{MAIN_NS}}}cellXfs/{{{MAIN_NS}}}xf"))
+    }
 
 
 def _read_cell_value(cell: ET.Element, shared_strings: list[str]) -> CellScalar:
@@ -243,19 +293,28 @@ def _column_letters(index: int) -> str:
 
 
 def _collect_fill_styles(workbook: WorkbookData) -> dict[str, int]:
-    """Return a mapping of RGB color to fill-style index."""
-    fills: dict[str, int] = {}
-    next_fill_id = 2
-    for sheet in workbook.sheets:
-        for cell in sheet.cells.values():
-            if cell.fill_rgb and cell.fill_rgb not in fills:
-                fills[cell.fill_rgb] = next_fill_id
-                next_fill_id += 1
-    return fills
+    """Return a mapping of RGB color to fill-style index.
+
+    Vectorized implementation: replace the nested ``for sheet … for cell``
+    loop with a single generator expression that streams all cell fill colors
+    across the workbook, then builds the de-duplication dict in one pass using
+    ``dict.fromkeys`` (O(n) hash-map construction).
+    """
+    unique_fills = dict.fromkeys(
+        rgb
+        for sheet in workbook.sheets
+        for cell in sheet.cells.values()
+        if (rgb := cell.fill_rgb)
+    )
+    return {rgb: idx for idx, rgb in enumerate(unique_fills, start=2)}
 
 
 def _render_content_types(workbook: WorkbookData) -> bytes:
-    """Render the ``[Content_Types].xml`` OOXML part as UTF-8 bytes."""
+    """Render the ``[Content_Types].xml`` OOXML part as UTF-8 bytes.
+
+    Vectorized: per-sheet ``<Override>`` elements are appended in one
+    ``root.extend()`` call driven by a generator expression.
+    """
     root = ET.Element(f"{{{CONTENT_NS}}}Types")
     ET.SubElement(
         root,
@@ -285,15 +344,17 @@ def _render_content_types(workbook: WorkbookData) -> bytes:
             "application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"
         ),
     )
-    for index, _sheet in enumerate(workbook.sheets, start=1):
-        ET.SubElement(
-            root,
+    root.extend(
+        ET.Element(
             f"{{{CONTENT_NS}}}Override",
             PartName=f"/xl/worksheets/sheet{index}.xml",
             ContentType=(
-                "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"
+                "application/vnd.openxmlformats-officedocument"
+                ".spreadsheetml.worksheet+xml"
             ),
         )
+        for index in range(1, len(workbook.sheets) + 1)
+    )
     return ET.tostring(root, encoding="utf-8", xml_declaration=True)
 
 
@@ -314,26 +375,37 @@ def _render_root_relationships() -> bytes:
 
 
 def _render_workbook(workbook: WorkbookData) -> bytes:
-    """Render the ``xl/workbook.xml`` OOXML part listing all sheets."""
+    """Render the ``xl/workbook.xml`` OOXML part listing all sheets.
+
+    Vectorized: per-sheet ``<sheet>`` elements are built by a helper and
+    appended via ``sheets_element.extend()``, replacing an explicit ``for`` loop.
+    """
     root = ET.Element(f"{{{MAIN_NS}}}workbook")
     sheets_element = ET.SubElement(root, f"{{{MAIN_NS}}}sheets")
-    for index, sheet in enumerate(workbook.sheets, start=1):
-        sheet_element = ET.SubElement(
-            sheets_element,
+
+    def _make_sheet_element(index_sheet: tuple[int, SheetData]) -> ET.Element:
+        index, sheet = index_sheet
+        element = ET.Element(
             f"{{{MAIN_NS}}}sheet",
             name=sheet.name,
             sheetId=str(index),
         )
-        sheet_element.set(f"{{{REL_NS}}}id", f"rId{index}")
+        element.set(f"{{{REL_NS}}}id", f"rId{index}")
+        return element
+
+    sheets_element.extend(map(_make_sheet_element, enumerate(workbook.sheets, start=1)))
     return ET.tostring(root, encoding="utf-8", xml_declaration=True)
 
 
 def _render_workbook_relationships(workbook: WorkbookData) -> bytes:
-    """Render the workbook relationship part for sheets and styles."""
+    """Render the workbook relationship part for sheets and styles.
+
+    Vectorized: per-sheet ``<Relationship>`` elements are appended in one
+    ``root.extend()`` call driven by a generator expression.
+    """
     root = ET.Element(f"{{{PKG_REL_NS}}}Relationships")
-    for index, _sheet in enumerate(workbook.sheets, start=1):
-        ET.SubElement(
-            root,
+    root.extend(
+        ET.Element(
             f"{{{PKG_REL_NS}}}Relationship",
             Id=f"rId{index}",
             Type=(
@@ -342,6 +414,8 @@ def _render_workbook_relationships(workbook: WorkbookData) -> bytes:
             ),
             Target=f"worksheets/sheet{index}.xml",
         )
+        for index in range(1, len(workbook.sheets) + 1)
+    )
     ET.SubElement(
         root,
         f"{{{PKG_REL_NS}}}Relationship",
@@ -376,11 +450,18 @@ def _render_styles(fill_styles: dict[str, int]) -> bytes:
         f"{{{MAIN_NS}}}patternFill",
         patternType="gray125",
     )
-    for rgb, _fill_id in sorted(fill_styles.items(), key=lambda item: item[1]):
-        fill = ET.SubElement(fills, f"{{{MAIN_NS}}}fill")
+
+    def _make_fill_element(rgb: str) -> ET.Element:
+        fill = ET.Element(f"{{{MAIN_NS}}}fill")
         pattern = ET.SubElement(fill, f"{{{MAIN_NS}}}patternFill", patternType="solid")
         ET.SubElement(pattern, f"{{{MAIN_NS}}}fgColor", rgb=rgb)
         ET.SubElement(pattern, f"{{{MAIN_NS}}}bgColor", indexed="64")
+        return fill
+
+    fills.extend(
+        _make_fill_element(rgb)
+        for rgb, _ in sorted(fill_styles.items(), key=lambda item: item[1])
+    )
 
     borders = ET.SubElement(root, f"{{{MAIN_NS}}}borders", count="1")
     ET.SubElement(borders, f"{{{MAIN_NS}}}border")
@@ -404,9 +485,8 @@ def _render_styles(fill_styles: dict[str, int]) -> bytes:
         borderId="0",
         xfId="0",
     )
-    for _rgb, fill_id in sorted(fill_styles.items(), key=lambda item: item[1]):
-        ET.SubElement(
-            cell_xfs,
+    cell_xfs.extend(
+        ET.Element(
             f"{{{MAIN_NS}}}xf",
             numFmtId="0",
             fontId="0",
@@ -415,6 +495,8 @@ def _render_styles(fill_styles: dict[str, int]) -> bytes:
             xfId="0",
             applyFill="1",
         )
+        for _, fill_id in sorted(fill_styles.items(), key=lambda item: item[1])
+    )
 
     cell_styles = ET.SubElement(root, f"{{{MAIN_NS}}}cellStyles", count="1")
     ET.SubElement(
@@ -428,7 +510,12 @@ def _render_styles(fill_styles: dict[str, int]) -> bytes:
 
 
 def _render_sheet(sheet: SheetData, fill_styles: dict[str, int]) -> bytes:
-    """Render a worksheet as an OOXML ``xl/worksheets/sheetN.xml`` part."""
+    """Render a worksheet as an OOXML ``xl/worksheets/sheetN.xml`` part.
+
+    Vectorized: the outer row loop and inner cell loop are replaced by a local
+    helper consumed through ``sheet_data.extend()``.  The inner cell iteration
+    is replaced by a list comprehension (side-effects on the row element).
+    """
     root = ET.Element(f"{{{MAIN_NS}}}worksheet")
     if sheet.max_row and sheet.max_column:
         ET.SubElement(
@@ -438,13 +525,21 @@ def _render_sheet(sheet: SheetData, fill_styles: dict[str, int]) -> bytes:
         )
     sheet_data = ET.SubElement(root, f"{{{MAIN_NS}}}sheetData")
 
+    def _make_row_element(row_group: tuple) -> ET.Element:
+        """Build one ``<row>`` element with all its non-null ``<c>`` children."""
+        row_index, row_iter = row_group
+        row_element = ET.Element(f"{{{MAIN_NS}}}row", r=str(row_index))
+        [
+            _render_cell(row_element, row_index, col_index, cell, fill_styles)
+            for (_, col_index), cell in row_iter
+            if cell.value is not None
+        ]
+        return row_element
+
     sorted_cells = sorted(sheet.cells.items())
-    for row_index, row_iter in groupby(sorted_cells, key=lambda item: item[0][0]):
-        row_element = ET.SubElement(sheet_data, f"{{{MAIN_NS}}}row", r=str(row_index))
-        for (_, column_index), cell in row_iter:
-            if cell.value is None:
-                continue
-            _render_cell(row_element, row_index, column_index, cell, fill_styles)
+    sheet_data.extend(
+        map(_make_row_element, groupby(sorted_cells, key=lambda item: item[0][0]))
+    )
     return ET.tostring(root, encoding="utf-8", xml_declaration=True)
 
 
