@@ -6,6 +6,7 @@ import itertools
 import re
 import shutil
 import sys
+import time
 from collections import defaultdict, deque
 from pathlib import Path
 from typing import Callable, TypeAlias
@@ -243,6 +244,7 @@ def _run_txt_progress(label: str, actions: list[tuple[str, TxtAction]]) -> None:
 
 def main() -> None:
     """Entry point for the ``iia-excel-reorg`` command-line tool."""
+    start_time = time.perf_counter()
     parser = build_parser()
     args = parser.parse_args()
     input_path = Path(args.input)
@@ -350,6 +352,8 @@ def main() -> None:
             ),
         ],
     )
+    elapsed = time.perf_counter() - start_time
+    print(f"Done in {elapsed:.2f}s")
 
 
 if __name__ == "__main__":
