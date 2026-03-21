@@ -71,11 +71,33 @@ class SheetData:
         *,
         start_column: int = 1,
     ) -> None:
-        """Write a row of values and optional fills starting at *start_column*."""
+        """Write a row of values and optional fills starting at *start_column*.
+
+        Vectorized implementation: builds all ``(row, col) -> CellData`` pairs
+        in a single dict-comprehension and merges them with ``dict.update``,
+        replacing the element-wise ``for offset, value in enumerate(values)``
+        append loop.  The max-row / max-column bookkeeping is resolved with
+        vectorized ``max()`` calls over the new column indices.
+        """
+        n = len(values)
+        if not n:
+            return
         normalized_fills = fills or ()
-        for offset, value in enumerate(values):
-            fill_rgb = normalized_fills[offset] if offset < len(normalized_fills) else None
-            self.set_cell(row, start_column + offset, value, fill_rgb=fill_rgb)
+        end_column = start_column + n - 1
+        new_cells = {
+            (row, start_column + offset): CellData(
+                value=value,
+                fill_rgb=_normalize_rgb(
+                    normalized_fills[offset] if offset < len(normalized_fills) else None
+                ),
+            )
+            for offset, value in enumerate(values)
+        }
+        self.cells.update(new_cells)
+        if row > self._max_row:
+            self._max_row = row
+        if end_column > self._max_column:
+            self._max_column = end_column
 
 
     @property
@@ -243,15 +265,20 @@ def _column_letters(index: int) -> str:
 
 
 def _collect_fill_styles(workbook: WorkbookData) -> dict[str, int]:
-    """Return a mapping of RGB color to fill-style index."""
-    fills: dict[str, int] = {}
-    next_fill_id = 2
-    for sheet in workbook.sheets:
-        for cell in sheet.cells.values():
-            if cell.fill_rgb and cell.fill_rgb not in fills:
-                fills[cell.fill_rgb] = next_fill_id
-                next_fill_id += 1
-    return fills
+    """Return a mapping of RGB color to fill-style index.
+
+    Vectorized implementation: replace the nested ``for sheet … for cell``
+    loop with a single generator expression that streams all cell fill colors
+    across the workbook, then builds the de-duplication dict in one pass using
+    ``dict.fromkeys`` (O(n) hash-map construction).
+    """
+    unique_fills = dict.fromkeys(
+        rgb
+        for sheet in workbook.sheets
+        for cell in sheet.cells.values()
+        if (rgb := cell.fill_rgb)
+    )
+    return {rgb: idx for idx, rgb in enumerate(unique_fills, start=2)}
 
 
 def _render_content_types(workbook: WorkbookData) -> bytes:

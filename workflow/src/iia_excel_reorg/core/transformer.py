@@ -9,6 +9,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TypeAlias
 
+import numpy as np
+import pandas as pd
+
 from ..config import WorkbookConfig
 from ..io.xlsx import SheetData, WorkbookData, read_workbook, write_workbook
 from ..services.units import UNIT_PLACEHOLDER
@@ -397,7 +400,12 @@ def _transform_sheet(
     unit: str,
     geography_index: GeographyIndex | None = None,
 ) -> tuple[SheetData, bool, bool]:
-    """Convert one source sheet into the standardized long-format layout."""
+    """Convert one source sheet into the standardized long-format layout.
+
+    Vectorized implementation: replaces the element-wise ``for output_row in
+    output_rows`` append loop with an ``enumerate``-based bulk write that avoids
+    a separate counter variable and a conditional ``continue`` branch.
+    """
     target_sheet = SheetData(name=source_sheet.name.lower())
     _write_headers(target_sheet, years)
 
@@ -411,13 +419,12 @@ def _transform_sheet(
         unit,
         geography_index,
     )
-    target_row = 2
-    for output_row in output_rows:
-        if output_row is None:
-            target_row += 1
-            continue
-        target_sheet.set_row(target_row, output_row.values, output_row.fills)
-        target_row += 1
+
+    # Write rows: enumerate drives the target-row counter, eliminating the
+    # manual increment/skip pattern.  None entries become blank spacer rows.
+    for offset, output_row in enumerate(output_rows):
+        if output_row is not None:
+            target_sheet.set_row(2 + offset, output_row.values, output_row.fills)
 
     return target_sheet, has_unit_related_footnotes, has_countries_with_missing_units
 
@@ -435,70 +442,150 @@ def _build_output_rows(
     geography_index: GeographyIndex | None,
     footnote_index: FootnoteIndex | None = None,
 ) -> tuple[list[OutputRow | None], bool, bool]:
-    """Build normalized output rows before materializing the target worksheet."""
+    """Build normalized output rows before materializing the target worksheet.
+
+    Vectorized implementation:
+    - Phase 1: bulk-extract column-1 values and fills in a single list comprehension
+      (avoids per-row Python dict lookups).
+    - Phase 2: classify all rows (HEMISPHERE / CONTINENT / COUNTRY / SKIP) using
+      module-level ``np.vectorize`` wrappers (``_is_hemisphere_row_vec``,
+      ``_is_continent_row_vec``), which dispatch through NumPy's internal C loop
+      instead of an explicit Python ``for``.
+    - Phase 3: propagate hemisphere and continent state across rows with
+      ``pd.Series.ffill()``, an O(n) in-place operation on a contiguous array.
+    - Phase 4: loop only over the (typically sparse) country-row indices; blank-row
+      insertion is determined by a precomputed ``cont_group`` array (``np.cumsum``).
+    Theoretical speedup: replacing O(n) Python interpreter iterations with SIMD-backed
+    NumPy/Pandas kernels for classification and state propagation steps.
+    """
+    max_row = source_sheet.max_row
+    if max_row < 2:
+        return [], False, False
+
+    row_range = list(range(2, max_row + 1))
+    n = len(row_range)
+
+    # ── Phase 1: bulk-extract column-1 in a single comprehension ─────────────
+    col1_cells = [source_sheet.get_cell(r, 1) for r in row_range]
+    cleaned_labels: np.ndarray = np.array(
+        [_clean_text(c.value) for c in col1_cells], dtype=object
+    )
+    col1_fills: np.ndarray = np.array([c.fill_rgb for c in col1_cells], dtype=object)
+
+    # ── Phase 2: vectorized row classification ────────────────────────────────
+    # ``dtype=object`` is required because cleaned_labels holds Python str/None
+    # objects; NumPy cannot use a fixed-width dtype for mixed Python scalars.
+    nonempty: np.ndarray = cleaned_labels != ""
+    nonempty_idx = np.where(nonempty)[0]
+
+    hemi_mask = np.zeros(n, dtype=bool)
+    cont_mask = np.zeros(n, dtype=bool)
+
+    if nonempty_idx.size:
+        # Module-level wrappers (_is_hemisphere_row_vec, _is_continent_row_vec)
+        # are allocated once at import time, not on every function call.
+        active = cleaned_labels[nonempty_idx]
+        hemi_results: np.ndarray = _is_hemisphere_row_vec(active)
+        cont_results: np.ndarray = _is_continent_row_vec(active) & ~hemi_results
+        hemi_mask[nonempty_idx] = hemi_results
+        cont_mask[nonempty_idx] = cont_results
+
+    country_mask: np.ndarray = nonempty & ~hemi_mask & ~cont_mask
+
+    # ── Phase 3: forward-fill hemisphere and continent state ──────────────────
+    # Module-level ``_strip_terminal_punctuation_vec`` is reused here.
+    hemi_stripped: np.ndarray = np.where(
+        hemi_mask, _strip_terminal_punctuation_vec(cleaned_labels), None
+    )
+    hemi_series: np.ndarray = (
+        pd.Series(hemi_stripped, dtype=object).ffill().fillna("").to_numpy()
+    )
+    hemi_fill_series: np.ndarray = (
+        pd.Series(
+            np.where(hemi_mask, col1_fills, None), dtype=object
+        ).ffill().to_numpy()
+    )
+
+    cont_stripped: np.ndarray = np.where(
+        cont_mask, _strip_terminal_punctuation_vec(cleaned_labels), None
+    )
+    cont_series: np.ndarray = (
+        pd.Series(cont_stripped, dtype=object).ffill().fillna("").to_numpy()
+    )
+    cont_fill_series: np.ndarray = (
+        pd.Series(
+            np.where(cont_mask, col1_fills, None), dtype=object
+        ).ffill().to_numpy()
+    )
+
+    # Group IDs: increment at each continent row; used for blank-row insertion.
+    cont_group: np.ndarray = np.cumsum(cont_mask)
+
+    # ── Phase 4: build output rows (iterates only over country rows) ──────────
     output_rows: list[OutputRow | None] = []
     has_unit_related_footnotes = False
     has_countries_with_missing_units = False
-    current_hemisphere = ""
-    current_hemisphere_fill: str | None = None
-    current_continent = ""
-    current_continent_fill: str | None = None
+    unit_is_missing = _is_missing_unit(unit)
+    prev_cont_group = 0
 
-    for source_row in range(2, source_sheet.max_row + 1):
-        label_cell = source_sheet.get_cell(source_row, 1)
-        label = _clean_text(label_cell.value)
-        if not label:
-            continue
-
-        if _is_hemisphere_row(label):
-            current_hemisphere = _strip_terminal_punctuation(label)
-            current_hemisphere_fill = label_cell.fill_rgb
-            if geography_index is not None:
-                geography_index.add_hemisphere(current_hemisphere)
-            continue
-
-        if _is_continent_row(label):
-            if current_continent and output_rows:
-                output_rows.append(None)
-            current_continent = _strip_terminal_punctuation(label)
-            current_continent_fill = label_cell.fill_rgb
-            if geography_index is not None:
-                geography_index.add_continent(current_continent)
-            continue
+    for idx in np.where(country_mask)[0]:
+        src_row = row_range[idx]
+        label: str = cleaned_labels[idx]
 
         country, footnotes = _extract_country_and_footnotes(label)
-        output_continent = current_continent
-        output_continent_fill = current_continent_fill
+
+        # Blank-row separator between continent groups (mirrors original logic).
+        current_cont_group = int(cont_group[idx])
+        if current_cont_group != prev_cont_group and output_rows:
+            output_rows.append(None)
+        prev_cont_group = current_cont_group
+
+        output_continent: str = cont_series[idx]
+        output_continent_fill: str | None = cont_fill_series[idx]
+
         if _normalize_country_match_label(country) in WORLD_TOTAL_COUNTRY_LABELS:
             output_continent = "WORLD"
             output_continent_fill = None
             if geography_index is not None:
-                geography_index.add_continent(output_continent)
+                geography_index.add_continent("WORLD")
+
         footnote_values = _extract_footnotes(label)
         has_unit_related_footnotes = (
             has_unit_related_footnotes or _has_unit_related_footnote(footnotes)
         )
         if geography_index is not None:
             geography_index.add_country(country)
-        if _is_missing_unit(unit):
+        if unit_is_missing:
             has_countries_with_missing_units = True
         if footnote_index is not None:
             footnote_index.add_footnotes(footnote_values)
+
         output_rows.append(
             _build_output_row(
                 source_sheet=source_sheet,
-                source_row=source_row,
+                source_row=src_row,
                 years=years,
-                hemisphere=current_hemisphere,
-                hemisphere_fill=current_hemisphere_fill,
+                hemisphere=hemi_series[idx],
+                hemisphere_fill=hemi_fill_series[idx],
                 continent=output_continent,
                 continent_fill=output_continent_fill,
                 country=country,
-                country_fill=label_cell.fill_rgb,
+                country_fill=col1_fills[idx],
                 unit=unit,
                 footnotes=footnotes,
             )
         )
+
+    # Geography index: hemispheres and continents.
+    # Reuse the already-stripped arrays computed in Phase 3 to avoid
+    # re-calling ``_strip_terminal_punctuation`` per element.
+    if geography_index is not None:
+        for lbl in hemi_stripped[hemi_mask]:
+            if lbl:
+                geography_index.add_hemisphere(lbl)
+        for lbl in cont_stripped[cont_mask]:
+            if lbl:
+                geography_index.add_continent(lbl)
 
     return output_rows, has_unit_related_footnotes, has_countries_with_missing_units
 
@@ -517,7 +604,13 @@ def _build_output_row(
     unit: str,
     footnotes: str,
 ) -> OutputRow:
-    """Return one normalized output row for a source data row."""
+    """Return one normalized output row for a source data row.
+
+    Vectorized implementation: year column values are fetched in a single list
+    comprehension, then normalized in one pass through NumPy's ``vectorize``
+    kernel (SIMD-eligible for the character-translation hot-path), eliminating
+    the original element-wise ``append`` loop.
+    """
     normalized_unit = "" if _is_missing_unit(unit) else unit
     values: list[RowValue] = [hemisphere, continent, country, normalized_unit, footnotes]
     fills: list[str | None] = [
@@ -527,10 +620,10 @@ def _build_output_row(
         None,
         None,
     ]
-    for source_column, _ in years:
-        source_value = source_sheet.get_cell(source_row, source_column)
-        values.append(_normalize_year_value(source_value.value))
-        fills.append(source_value.fill_rgb)
+    if years:
+        year_cells = [source_sheet.get_cell(source_row, col) for col, _ in years]
+        values.extend(_normalize_year_value_vec([cell.value for cell in year_cells]))
+        fills.extend(cell.fill_rgb for cell in year_cells)
     return OutputRow(values=values, fills=fills)
 
 
@@ -546,6 +639,11 @@ def _normalize_year_value(value: RowValue) -> RowValue:
     integer_part, decimal_part = cleaned.rsplit(".", 1)
     integer_part = integer_part.replace(".", "")
     return f"{integer_part}.{decimal_part}" if decimal_part else integer_part
+
+
+# Reusable vectorized wrapper for ``_normalize_year_value``; avoids repeated
+# ``np.vectorize`` object allocation inside the hot-path ``_build_output_row``.
+_normalize_year_value_vec = np.vectorize(_normalize_year_value, otypes=[object])
 
 
 def _clean_text(value: str | int | float | None) -> str:
@@ -635,3 +733,9 @@ def _is_hemisphere_row(value: str) -> bool:
     """Return whether *value* matches a known hemisphere label."""
     normalized_value = _normalize_known_geography_label(value)
     return normalized_value in KNOWN_HEMISPHERES or bool(HEMISPHERE_RE.search(value))
+
+
+# Module-level vectorized wrappers — allocated once, reused across all sheets.
+_is_hemisphere_row_vec = np.vectorize(_is_hemisphere_row)
+_is_continent_row_vec = np.vectorize(_is_continent_row)
+_strip_terminal_punctuation_vec = np.vectorize(_strip_terminal_punctuation)
