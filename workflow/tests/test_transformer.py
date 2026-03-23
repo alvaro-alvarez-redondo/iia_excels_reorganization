@@ -497,6 +497,34 @@ def test_transform_workbook_tracks_documents_with_countries_missing_units(
     assert txt_path.read_text(encoding="utf-8") == "[documents]\nstandardized.xlsx\n"
 
 
+def test_transform_workbook_allows_original_name_for_missing_unit_index(
+    tmp_path: Path,
+) -> None:
+    source_path = tmp_path / "reviewed_1_2_wheat.xlsx"
+    output_path = tmp_path / "r_iia_reviewed_iia_1929_1_2_wheat.xlsx"
+    _build_source_workbook(source_path, include_imports=True)
+    missing_unit_country_document_index = MissingUnitCountryDocumentIndex()
+
+    config_path = _write_config(
+        tmp_path / "config.yml",
+        _standard_config_lines("reviewed_1_2_wheat"),
+    )
+
+    transform_workbook(
+        source_path,
+        output_path,
+        config=load_config(config_path),
+        missing_unit_country_document_index=missing_unit_country_document_index,
+        missing_unit_country_document_name=source_path.name,
+    )
+
+    assert missing_unit_country_document_index.documents == {"reviewed_1_2_wheat.xlsx"}
+    txt_path = missing_unit_country_document_index.write_txt(
+        tmp_path / "missing_country_units.txt"
+    )
+    assert txt_path.read_text(encoding="utf-8") == "[documents]\nreviewed_1_2_wheat.xlsx\n"
+
+
 def test_transform_workbook_treats_na_like_units_as_missing(
     tmp_path: Path,
 ) -> None:
@@ -895,7 +923,7 @@ def test_cli_main_creates_structured_output(
     )
     missing_units_docs_path = lists_dir / "final_docs_with_missing_country_units.txt"
     assert missing_units_docs_path.read_text(encoding="utf-8") == (
-        "[documents]\n" f"{transformed_files[0].name}\n"
+        "[documents]\n" f"{source.name}\n"
     )
     duplicate_original_docs_path = lists_dir / "duplicated_original_documents.txt"
     assert duplicate_original_docs_path.read_text(encoding="utf-8") == "[documents]\n"

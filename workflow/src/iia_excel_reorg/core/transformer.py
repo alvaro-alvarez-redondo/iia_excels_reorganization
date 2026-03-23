@@ -332,6 +332,7 @@ def transform_workbook(
     geography_index: GeographyIndex | None = None,
     unit_footnote_document_index: UnitFootnoteDocumentIndex | None = None,
     missing_unit_country_document_index: MissingUnitCountryDocumentIndex | None = None,
+    missing_unit_country_document_name: str | None = None,
 ) -> Path:
     """Read *input_path*, transform each eligible sheet, and write to *output_path*.
 
@@ -388,7 +389,9 @@ def transform_workbook(
         has_countries_with_missing_units
         and missing_unit_country_document_index is not None
     ):
-        missing_unit_country_document_index.add_document(written_output_path.name)
+        missing_unit_country_document_index.add_document(
+            missing_unit_country_document_name or written_output_path.name
+        )
     return written_output_path
 
 

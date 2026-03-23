@@ -294,6 +294,7 @@ def main() -> None:
             geography_index=geography_index,
             unit_footnote_document_index=unit_footnote_document_index,
             missing_unit_country_document_index=missing_unit_country_document_index,
+            missing_unit_country_document_name=workbook_path.name,
         )
         document_index.add_document(output_path.name)
         product_index.add_product(derive_product_from_document(output_path.name))
