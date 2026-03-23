@@ -302,7 +302,29 @@ class UnitFootnoteDocumentIndex(DocumentIndex):
 
 @dataclass(slots=True)
 class MissingUnitCountryDocumentIndex(DocumentIndex):
-    """Track transformed documents that contain at least one country with no unit."""
+    """Track documents with countries that are missing units."""
+
+    original_to_final_documents: set[tuple[str, str]] = field(default_factory=set)
+
+    def add_document_pair(self, original_name: str, final_name: str) -> None:
+        """Track the mapping from *original_name* to flagged *final_name*."""
+        if not original_name or not final_name:
+            return
+        self.original_to_final_documents.add((original_name, final_name))
+        self.add_document(final_name)
+
+    def write_txt(self, path: str | Path) -> Path:
+        """Write a tab-separated report with original and flagged final names."""
+        output_path = Path(path)
+        rows = sorted(self.original_to_final_documents)
+        lines = [
+            "[documents]",
+            "Original Name\tFinal Name (Status: Missing Units)",
+            *(f"{original}\t{final}" for original, final in rows),
+            "",
+        ]
+        output_path.write_text("\n".join(lines), encoding="utf-8")
+        return output_path
 
 
 @dataclass(slots=True)
