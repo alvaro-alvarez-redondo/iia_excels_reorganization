@@ -8,6 +8,7 @@ from iia_excel_reorg.cli import (
     DuplicateOriginalDocumentIndex,
     _compute_output_subdir,
     _ensure_workspace,
+    _extract_sheet_names,
     _iter_workbooks_structured,
 )
 from iia_excel_reorg.config import WorkbookConfig, load_config
@@ -496,7 +497,7 @@ def test_transform_workbook_tracks_documents_with_countries_missing_units(
     )
     assert txt_path.read_text(encoding="utf-8") == (
         "[documents]\n"
-        "Original Name\tFinal Name (Status: Missing Units)\n"
+        "Original Excel Name\tExcel Sheet Names\n"
     )
 
 
@@ -899,13 +900,19 @@ def test_cli_main_creates_structured_output(
     missing_units_docs_path = lists_dir / "final_docs_with_missing_country_units.txt"
     assert missing_units_docs_path.read_text(encoding="utf-8") == (
         "[documents]\n"
-        "Original Name\tFinal Name (Status: Missing Units)\n"
-        f"{source.name}\t{transformed_files[0].name}\n"
+        "Original Excel Name\tExcel Sheet Names\n"
+        f"{source.name}\tArea; Production; Imports\n"
     )
     duplicate_original_docs_path = lists_dir / "duplicated_original_documents.txt"
     assert duplicate_original_docs_path.read_text(encoding="utf-8") == "[documents]\n"
     captured = capsys.readouterr()
     assert "Generating txt lists" in captured.out
+
+
+def test_extract_sheet_names_handles_unreadable_workbook(tmp_path: Path) -> None:
+    broken = tmp_path / "broken.xlsx"
+    broken.write_bytes(b"not-a-workbook")
+    assert _extract_sheet_names(broken) == "Could not read sheets"
 
 
 def test_ensure_workspace_creates_missing_input_and_output_dirs(tmp_path: Path) -> None:

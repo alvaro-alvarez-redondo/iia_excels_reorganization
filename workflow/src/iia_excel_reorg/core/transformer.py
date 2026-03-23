@@ -304,23 +304,22 @@ class UnitFootnoteDocumentIndex(DocumentIndex):
 class MissingUnitCountryDocumentIndex(DocumentIndex):
     """Track documents with countries that are missing units."""
 
-    original_to_final_documents: set[tuple[str, str]] = field(default_factory=set)
+    original_to_sheet_names: list[tuple[str, str]] = field(default_factory=list)
 
-    def add_document_pair(self, original_name: str, final_name: str) -> None:
-        """Track the mapping from *original_name* to flagged *final_name*."""
-        if not original_name or not final_name:
+    def add_document_sheet_names(self, original_name: str, sheet_names: str) -> None:
+        """Track the mapping from *original_name* to workbook *sheet_names*."""
+        if not original_name or not sheet_names:
             return
-        self.original_to_final_documents.add((original_name, final_name))
-        self.add_document(final_name)
+        self.original_to_sheet_names.append((original_name, sheet_names))
 
     def write_txt(self, path: str | Path) -> Path:
-        """Write a tab-separated report with original and flagged final names."""
+        """Write a tab-separated report with original names and sheet names."""
         output_path = Path(path)
-        rows = sorted(self.original_to_final_documents)
+        rows = sorted(self.original_to_sheet_names)
         lines = [
             "[documents]",
-            "Original Name\tFinal Name (Status: Missing Units)",
-            *(f"{original}\t{final}" for original, final in rows),
+            "Original Excel Name\tExcel Sheet Names",
+            *(f"{original}\t{sheet_names}" for original, sheet_names in rows),
             "",
         ]
         output_path.write_text("\n".join(lines), encoding="utf-8")

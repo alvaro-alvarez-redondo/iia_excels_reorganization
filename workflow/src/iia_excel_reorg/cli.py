@@ -21,6 +21,7 @@ from .core.transformer import (
 )
 from .utils.naming import sanitize_name
 from .utils.text import derive_product_from_document
+from .xlsx_io import read_workbook
 
 WorkbookEntry: TypeAlias = tuple[Path, Path]
 WorkbookAction: TypeAlias = Callable[[WorkbookEntry], None]
@@ -174,6 +175,15 @@ def _iter_workbooks_structured(root: Path) -> list[WorkbookEntry]:
     ]
 
 
+def _extract_sheet_names(path: Path) -> str:
+    """Return a semicolon-delimited list of sheet names for *path*."""
+    try:
+        workbook = read_workbook(path)
+        return "; ".join(sheet.name.title() for sheet in workbook.sheets)
+    except Exception:
+        return "Could not read sheets"
+
+
 def _ensure_workspace(input_path: Path, output_root: Path) -> None:
     """Create or reset the input/output workspace directories."""
     if not input_path.exists() and input_path.suffix == "":
@@ -282,6 +292,7 @@ def main() -> None:
         """Transform a single workbook and write it into the output tree."""
         workbook_path, output_subdir = entry
         output_dir = output_root / output_subdir
+        sheet_names = _extract_sheet_names(workbook_path)
         duplicate_original_document_index.add_document(workbook_path, root=input_path)
         output_name = (
             f"{sanitize_name(config.canonical_name_for_document(workbook_path))}.xlsx"
@@ -299,9 +310,9 @@ def main() -> None:
             ),
         )
         if entry_missing_unit_country_document_index.documents:
-            missing_unit_country_document_index.add_document_pair(
+            missing_unit_country_document_index.add_document_sheet_names(
                 workbook_path.name,
-                output_path.name,
+                sheet_names,
             )
         document_index.add_document(output_path.name)
         product_index.add_product(derive_product_from_document(output_path.name))
