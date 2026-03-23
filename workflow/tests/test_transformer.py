@@ -895,7 +895,7 @@ def test_cli_main_creates_structured_output(
     )
     missing_units_docs_path = lists_dir / "final_docs_with_missing_country_units.txt"
     assert missing_units_docs_path.read_text(encoding="utf-8") == (
-        "[documents]\n" f"{transformed_files[0].name}\n"
+        "[documents]\n" f"{source.name}\n"
     )
     duplicate_original_docs_path = lists_dir / "duplicated_original_documents.txt"
     assert duplicate_original_docs_path.read_text(encoding="utf-8") == "[documents]\n"

@@ -287,14 +287,19 @@ def main() -> None:
             f"{sanitize_name(config.canonical_name_for_document(workbook_path))}.xlsx"
         )
         output_path = output_dir / output_name
+        entry_missing_unit_country_document_index = MissingUnitCountryDocumentIndex()
         transform_workbook(
             workbook_path,
             output_path,
             config=config,
             geography_index=geography_index,
             unit_footnote_document_index=unit_footnote_document_index,
-            missing_unit_country_document_index=missing_unit_country_document_index,
+            missing_unit_country_document_index=(
+                entry_missing_unit_country_document_index
+            ),
         )
+        if entry_missing_unit_country_document_index.documents:
+            missing_unit_country_document_index.add_document(workbook_path.name)
         document_index.add_document(output_path.name)
         product_index.add_product(derive_product_from_document(output_path.name))
 
