@@ -299,7 +299,10 @@ def main() -> None:
             ),
         )
         if entry_missing_unit_country_document_index.documents:
-            missing_unit_country_document_index.add_document(workbook_path.name)
+            missing_unit_country_document_index.add_document_pair(
+                workbook_path.name,
+                output_path.name,
+            )
         document_index.add_document(output_path.name)
         product_index.add_product(derive_product_from_document(output_path.name))
 

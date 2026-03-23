@@ -494,7 +494,10 @@ def test_transform_workbook_tracks_documents_with_countries_missing_units(
     txt_path = missing_unit_country_document_index.write_txt(
         tmp_path / "missing_country_units.txt"
     )
-    assert txt_path.read_text(encoding="utf-8") == "[documents]\nstandardized.xlsx\n"
+    assert txt_path.read_text(encoding="utf-8") == (
+        "[documents]\n"
+        "Original Name\tFinal Name (Status: Missing Units)\n"
+    )
 
 
 def test_transform_workbook_treats_na_like_units_as_missing(
@@ -895,7 +898,9 @@ def test_cli_main_creates_structured_output(
     )
     missing_units_docs_path = lists_dir / "final_docs_with_missing_country_units.txt"
     assert missing_units_docs_path.read_text(encoding="utf-8") == (
-        "[documents]\n" f"{source.name}\n"
+        "[documents]\n"
+        "Original Name\tFinal Name (Status: Missing Units)\n"
+        f"{source.name}\t{transformed_files[0].name}\n"
     )
     duplicate_original_docs_path = lists_dir / "duplicated_original_documents.txt"
     assert duplicate_original_docs_path.read_text(encoding="utf-8") == "[documents]\n"
