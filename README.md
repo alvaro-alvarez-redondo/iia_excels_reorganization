@@ -393,6 +393,26 @@ iia-excel-reorg path/to/input_dir path/to/output/ --config workflow/config/examp
 The `input` argument defaults to `data/raw_inputs/` and the `output_dir` argument
 defaults to `data/10-raw_imports/` — both relative to the current working directory.
 
+### Independent pipeline: Footnote Harmonization Pipeline
+
+Use the independent `iia-footnote-harmonizer` command to clean and remap
+footnotes directly inside `data/10-raw_imports/` while preserving the exact
+folder/file layout.
+
+```bash
+# 1) Scan all files in 10-raw_imports and generate a mapping template
+iia-footnote-harmonizer generate-template data/10-raw_imports data/lists/footnote_mapping_template.xlsx
+
+# 2) Fill "Cleaned Footnote" manually in the generated template
+
+# 3) Apply mapping in place to every workbook under 10-raw_imports
+iia-footnote-harmonizer apply-mapping data/10-raw_imports data/lists/footnote_mapping_template.xlsx
+```
+
+The template contains two columns: `Original Footnote` (auto-populated with all
+unique footnotes found across files/sheets/rows) and `Cleaned Footnote` (manual
+mapping target). Multiple original footnotes may map to the same cleaned value.
+
 ## Transformation rules implemented
 
 ### Sheet names

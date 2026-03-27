@@ -30,6 +30,7 @@ class OutputRow:
 
 HEADER_FILL = "FF3CCB5A"
 HEADER_COLUMNS = ["hemisphere", "continent", "country", "unit", "footnotes"]
+HEADER_HAS_DIGIT_RE = re.compile(r"\d")
 PAREN_RE = re.compile(r"\(([^()]*)\)")
 HEMISPHERE_RE = re.compile(r"h[eéê]misph[eèê]?re|hemisphere", re.IGNORECASE)
 
@@ -327,6 +328,11 @@ class MissingUnitCountryDocumentIndex(DocumentIndex):
 
 
 @dataclass(slots=True)
+class NonYearHeaderDocumentIndex(DocumentIndex):
+    """Track documents containing non-empty header columns with no digits."""
+
+
+@dataclass(slots=True)
 class FootnoteIndex:
     """Accumulate unique normalized footnotes."""
 
@@ -353,6 +359,7 @@ def transform_workbook(
     geography_index: GeographyIndex | None = None,
     unit_footnote_document_index: UnitFootnoteDocumentIndex | None = None,
     missing_unit_country_document_index: MissingUnitCountryDocumentIndex | None = None,
+    non_year_header_document_index: NonYearHeaderDocumentIndex | None = None,
 ) -> Path:
     """Read *input_path*, transform each eligible sheet, and write to *output_path*.
 
@@ -364,14 +371,17 @@ def transform_workbook(
     workbook_config = config or WorkbookConfig()
     source_path = Path(input_path)
     source_workbook = read_workbook(source_path)
+    has_non_year_headers = False
 
     def _process_sheet(
         source_sheet: SheetData,
     ) -> tuple[SheetData, bool, bool] | None:
         """Return the transformed result for one eligible sheet, or ``None``."""
+        nonlocal has_non_year_headers
         if not workbook_config.should_include_sheet(source_sheet.name):
             return None
-        years = _extract_year_headers(source_sheet)
+        years, non_year_headers = _extract_header_columns(source_sheet)
+        has_non_year_headers = has_non_year_headers or bool(non_year_headers)
         if not years:
             return None
         mapped_unit = workbook_config.mapped_unit_for(source_path, source_sheet.name)
@@ -410,16 +420,33 @@ def transform_workbook(
         and missing_unit_country_document_index is not None
     ):
         missing_unit_country_document_index.add_document(written_output_path.name)
+    if has_non_year_headers and non_year_header_document_index is not None:
+        non_year_header_document_index.add_document(written_output_path.name)
     return written_output_path
 
 
 def _extract_year_headers(sheet: SheetData) -> list[HeaderYear]:
-    """Return ``(column_index, label)`` pairs for populated header cells."""
-    return [
+    """Return ``(column_index, label)`` pairs for headers containing a digit."""
+    years, _ = _extract_header_columns(sheet)
+    return years
+
+
+def _extract_header_columns(sheet: SheetData) -> tuple[list[HeaderYear], list[str]]:
+    """Split populated row-1 headers into year-like and non-year-like columns."""
+    header_cells = [
         (column, header)
         for column in range(2, sheet.max_column + 1)
         if (header := _stringify_header(sheet.get_cell(1, column).value))
     ]
+    years = [
+        (column, header)
+        for column, header in header_cells
+        if HEADER_HAS_DIGIT_RE.search(header)
+    ]
+    non_year_headers = [
+        header for _, header in header_cells if not HEADER_HAS_DIGIT_RE.search(header)
+    ]
+    return years, non_year_headers
 
 
 def _transform_sheet(
