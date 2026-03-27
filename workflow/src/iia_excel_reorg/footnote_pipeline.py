@@ -197,8 +197,18 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> None:
     """CLI entrypoint for the independent footnote harmonization pipeline."""
     parser = build_parser()
-    cli_args = sys.argv[1:] or ["generate-template"]
-    args = parser.parse_args(cli_args)
+    cli_args = sys.argv[1:]
+    if not cli_args:
+        if DEFAULT_TEMPLATE_PATH.exists():
+            args = parser.parse_args(
+                ["apply-mapping", str(DEFAULT_INPUT_DIR), str(DEFAULT_TEMPLATE_PATH)]
+            )
+        else:
+            args = parser.parse_args(
+                ["generate-template", str(DEFAULT_INPUT_DIR), str(DEFAULT_TEMPLATE_PATH)]
+            )
+    else:
+        args = parser.parse_args(cli_args)
     if args.command == "generate-template":
         output_path = generate_mapping_template(args.input_dir, args.template_path)
         print(f"Generated mapping template: {output_path}")
