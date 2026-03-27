@@ -97,3 +97,29 @@ def test_cli_defaults_to_generate_template_when_no_subcommand(
     assert template_path.exists()
     template = read_workbook(template_path)
     assert template.sheets[0].get_cell(2, 1).value == "reexports"
+
+
+def test_cli_defaults_to_apply_mapping_when_template_exists(
+    tmp_path: Path, monkeypatch
+) -> None:
+    source_root = tmp_path / "data" / "10-raw_imports"
+    source_root.mkdir(parents=True)
+    workbook_path = source_root / "doc.xlsx"
+    _build_workbook(workbook_path, "area", [("Austria", "r; note a")])
+
+    template_sheet = SheetData(name="footnote_mapping")
+    template_sheet.set_row(1, ["Original Footnote", "Cleaned Footnote"])
+    template_sheet.set_row(2, ["r", "reexports"])
+    template_sheet.set_row(3, ["note a", "special note"])
+    template_path = tmp_path / DEFAULT_TEMPLATE_PATH
+    template_path.parent.mkdir(parents=True, exist_ok=True)
+    write_workbook(template_path, WorkbookData(sheets=[template_sheet]))
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(sys, "argv", ["iia-footnote-harmonizer"])
+
+    main()
+
+    workbook = read_workbook(workbook_path)
+    sheet = workbook.sheets[0]
+    assert sheet.get_cell(2, 5).value == "reexports; special note"
