@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 from iia_excel_reorg.footnote_pipeline import (
     apply_mapping_in_place,
+    DEFAULT_TEMPLATE_PATH,
     generate_mapping_template,
+    main,
 )
 from iia_excel_reorg.xlsx_io import SheetData, WorkbookData, read_workbook, write_workbook
 
@@ -77,3 +80,20 @@ def test_apply_mapping_in_place_supports_many_to_one(tmp_path: Path) -> None:
     assert sheet.get_cell(2, 5).value == "reexports; special note"
     assert sheet.get_cell(3, 5).value == "special note"
 
+
+def test_cli_defaults_to_generate_template_when_no_subcommand(
+    tmp_path: Path, monkeypatch
+) -> None:
+    source_root = tmp_path / "data" / "10-raw_imports"
+    source_root.mkdir(parents=True)
+    _build_workbook(source_root / "doc.xlsx", "area", [("Austria", "reexports")])
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(sys, "argv", ["iia-footnote-harmonizer"])
+
+    main()
+
+    template_path = tmp_path / DEFAULT_TEMPLATE_PATH
+    assert template_path.exists()
+    template = read_workbook(template_path)
+    assert template.sheets[0].get_cell(2, 1).value == "reexports"
