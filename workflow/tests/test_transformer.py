@@ -22,6 +22,7 @@ from iia_excel_reorg.transformer import (
     FootnoteIndex,
     GeographyIndex,
     MissingUnitCountryDocumentIndex,
+    NonYearHeaderDocumentIndex,
     ProductIndex,
     UnitFootnoteDocumentIndex,
     _extract_footnotes,
@@ -115,6 +116,19 @@ def _build_ocr_year_values_workbook(path: Path) -> None:
     area.set_cell(4, 2, "IoiO")
     area.set_cell(4, 3, "bio")
     area.set_cell(4, 4, "1.2.3a")
+    write_workbook(path, WorkbookData(sheets=[area]))
+
+
+def _build_non_year_header_workbook(path: Path) -> None:
+    """Build a workbook with one non-year header (contains no digits)."""
+    area = SheetData(name="AREA")
+    area.set_cell(1, 2, "Total")
+    area.set_cell(1, 3, "1922")
+    area.set_cell(2, 1, "HÉMISPHÈRE SEPTENTRIONAL")
+    area.set_cell(3, 1, "EUROPE")
+    area.set_cell(4, 1, "Austria")
+    area.set_cell(4, 2, 99)
+    area.set_cell(4, 3, 12)
     write_workbook(path, WorkbookData(sheets=[area]))
 
 
@@ -274,6 +288,37 @@ def test_transform_workbook_normalizes_ocr_like_year_values(tmp_path: Path) -> N
     assert area.get_cell(2, 6).value == "1010"
     assert area.get_cell(2, 7).value == "10"
     assert area.get_cell(2, 8).value == "12.3"
+
+
+def test_transform_workbook_tracks_docs_with_non_year_headers(tmp_path: Path) -> None:
+    source_path = tmp_path / "r_iia_trade_1950_3_5_wheat.xlsx"
+    output_path = tmp_path / "standardized.xlsx"
+    _build_non_year_header_workbook(source_path)
+    non_year_header_document_index = NonYearHeaderDocumentIndex()
+
+    config_path = _write_config(
+        tmp_path / "config.yml",
+        _standard_config_lines("r_iia_trade_1950_3_5_wheat"),
+    )
+
+    transform_workbook(
+        source_path,
+        output_path,
+        config=load_config(config_path),
+        non_year_header_document_index=non_year_header_document_index,
+    )
+
+    result = read_workbook(output_path)
+    area = result.sheets[0]
+    assert [area.get_cell(1, idx).value for idx in range(1, 7)] == [
+        "hemisphere",
+        "continent",
+        "country",
+        "unit",
+        "footnotes",
+        "1922",
+    ]
+    assert non_year_header_document_index.documents == {output_path.name}
 
 
 def test_transform_workbook_inserts_blank_row_before_each_new_continent(
@@ -889,6 +934,7 @@ def test_cli_main_creates_structured_output(
     assert (lists_dir / "unique_country_values.txt").is_file()
     assert (lists_dir / "unique_product_values.txt").is_file()
     assert (lists_dir / "final_docs_with_missing_country_units.txt").is_file()
+    assert (lists_dir / "final_docs_with_extra_non_year_columns.txt").is_file()
     final_docs_path = lists_dir / "final_docs.txt"
     assert final_docs_path.read_text(encoding="utf-8") == (
         "[documents]\n" f"{transformed_files[0].name}\n"
@@ -903,6 +949,8 @@ def test_cli_main_creates_structured_output(
         "Original Excel Name\tExcel Sheet Names\n"
         f"{source.name}\tArea; Production; Imports\n"
     )
+    non_year_header_docs_path = lists_dir / "final_docs_with_extra_non_year_columns.txt"
+    assert non_year_header_docs_path.read_text(encoding="utf-8") == "[documents]\n"
     duplicate_original_docs_path = lists_dir / "duplicated_original_documents.txt"
     assert duplicate_original_docs_path.read_text(encoding="utf-8") == "[documents]\n"
     captured = capsys.readouterr()
