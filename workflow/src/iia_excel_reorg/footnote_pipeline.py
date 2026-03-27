@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
 from .io.xlsx import SheetData, WorkbookData, read_workbook, write_workbook
@@ -196,7 +197,8 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> None:
     """CLI entrypoint for the independent footnote harmonization pipeline."""
     parser = build_parser()
-    args = parser.parse_args()
+    cli_args = sys.argv[1:] or ["generate-template"]
+    args = parser.parse_args(cli_args)
     if args.command == "generate-template":
         output_path = generate_mapping_template(args.input_dir, args.template_path)
         print(f"Generated mapping template: {output_path}")
