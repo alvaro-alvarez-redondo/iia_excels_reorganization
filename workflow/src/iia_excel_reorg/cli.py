@@ -15,6 +15,7 @@ from .core.transformer import (
     DocumentIndex,
     GeographyIndex,
     MissingUnitCountryDocumentIndex,
+    NonYearHeaderDocumentIndex,
     ProductIndex,
     UnitFootnoteDocumentIndex,
     transform_workbook,
@@ -41,6 +42,9 @@ FINAL_DOCUMENTS_INDEX_FILENAME = "final_docs.txt"
 UNIT_FOOTNOTE_DOCUMENT_INDEX_FILENAME = "final_docs_with_unit_footnotes.txt"
 MISSING_UNIT_COUNTRY_DOCUMENT_INDEX_FILENAME = (
     "final_docs_with_missing_country_units.txt"
+)
+NON_YEAR_HEADER_DOCUMENT_INDEX_FILENAME = (
+    "final_docs_with_extra_non_year_columns.txt"
 )
 DUPLICATE_ORIGINAL_DOCUMENTS_FILENAME = "duplicated_original_documents.txt"
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -282,6 +286,7 @@ def main() -> None:
     duplicate_original_document_index = DuplicateOriginalDocumentIndex()
     unit_footnote_document_index = UnitFootnoteDocumentIndex()
     missing_unit_country_document_index = MissingUnitCountryDocumentIndex()
+    non_year_header_document_index = NonYearHeaderDocumentIndex()
 
     def prepare_output(entry: WorkbookEntry) -> None:
         """Create the output subdirectory for *entry* if needed."""
@@ -308,6 +313,7 @@ def main() -> None:
             missing_unit_country_document_index=(
                 entry_missing_unit_country_document_index
             ),
+            non_year_header_document_index=non_year_header_document_index,
         )
         if entry_missing_unit_country_document_index.documents:
             missing_unit_country_document_index.add_document_sheet_names(
@@ -361,6 +367,12 @@ def main() -> None:
                 MISSING_UNIT_COUNTRY_DOCUMENT_INDEX_FILENAME,
                 lambda: missing_unit_country_document_index.write_txt(
                     LISTS_DIR / MISSING_UNIT_COUNTRY_DOCUMENT_INDEX_FILENAME
+                ),
+            ),
+            (
+                NON_YEAR_HEADER_DOCUMENT_INDEX_FILENAME,
+                lambda: non_year_header_document_index.write_txt(
+                    LISTS_DIR / NON_YEAR_HEADER_DOCUMENT_INDEX_FILENAME
                 ),
             ),
             (
