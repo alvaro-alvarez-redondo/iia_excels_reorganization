@@ -401,12 +401,12 @@ folder/file layout.
 
 ```bash
 # 1) Scan all files in 10-raw_imports and generate a mapping template
-iia-footnote-harmonizer generate-template data/10-raw_imports data/lists/footnote_mapping_template.xlsx
+iia-footnote-harmonizer generate-template data/10-raw_imports data/footnote_mapping.xlsx
 
 # 2) Fill "Cleaned Footnote" manually in the generated template
 
 # 3) Apply mapping in place to every workbook under 10-raw_imports
-iia-footnote-harmonizer apply-mapping data/10-raw_imports data/lists/footnote_mapping_template.xlsx
+iia-footnote-harmonizer apply-mapping data/10-raw_imports data/footnote_mapping.xlsx
 ```
 
 The template contains two columns: `Original Footnote` (auto-populated with all

@@ -10,7 +10,7 @@ from .io.xlsx import SheetData, WorkbookData, read_workbook, write_workbook
 
 PIPELINE_NAME = "Footnote Harmonization Pipeline"
 DEFAULT_INPUT_DIR = Path("data/10-raw_imports")
-DEFAULT_TEMPLATE_PATH = Path("data/lists/footnote_mapping_template.xlsx")
+DEFAULT_TEMPLATE_PATH = Path("data/footnote_mapping.xlsx")
 _EXCEL_SUFFIXES = frozenset({".xlsx", ".xlsm"})
 _ORIGINAL_FOOTNOTE_HEADER = "original footnote"
 _CLEANED_FOOTNOTE_HEADER = "cleaned footnote"

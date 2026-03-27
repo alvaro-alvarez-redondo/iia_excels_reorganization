@@ -37,7 +37,7 @@ def test_generate_mapping_template_scans_nested_tree_and_deduplicates(tmp_path: 
         [("Canada", "unit note q; reexports")],
     )
 
-    template_path = tmp_path / "footnote_mapping_template.xlsx"
+    template_path = tmp_path / "footnote_mapping.xlsx"
     generate_mapping_template(source_root, template_path)
 
     template = read_workbook(template_path)
